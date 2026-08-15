@@ -1,0 +1,22 @@
+- generic [ref=e4]:
+  - generic [ref=e5]:
+    - img "robot" [ref=e7]
+    - heading "AI Agent Platform" [level=1] [ref=e10]
+    - paragraph [ref=e11]: 企业级 AI Agent 管理后台
+  - generic [ref=e12]:
+    - generic [ref=e18]:
+      - img "user" [ref=e20]
+      - textbox "用户名" [ref=e23]
+    - generic [ref=e29]:
+      - img "lock" [ref=e31]
+      - textbox "密码" [ref=e34]
+      - img "eye-invisible" [ref=e36] [cursor=pointer]
+    - button "登 录" [ref=e45] [cursor=pointer]
+  - generic [ref=e47]:
+    - paragraph [ref=e48]: 演示账号
+    - generic [ref=e49] [cursor=pointer]:
+      - generic [ref=e50]: 管理员
+      - generic [ref=e51]: admin / admin123456
+    - generic [ref=e52] [cursor=pointer]:
+      - generic [ref=e53]: 客服
+      - generic [ref=e54]: cs_agent / cs123456

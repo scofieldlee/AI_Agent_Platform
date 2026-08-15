@@ -1,0 +1,46 @@
+# ====================================
+# AI Agent Platform - Python Dependencies
+# ====================================
+
+# --- Web Framework ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# --- Database ---
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+pgvector==0.3.6
+
+# --- Redis ---
+redis==5.2.1
+
+# --- Pydantic ---
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# --- LangChain + LangGraph ---
+langchain>=0.3.14
+langchain-core>=0.3.29
+langchain-openai>=0.3.0
+langchain-community>=0.3.14
+langgraph>=0.2.62
+
+# --- HTTP ---
+httpx==0.28.1
+
+# --- Document Parsing (Attachments) ---
+pypdf>=4.0.0
+python-docx>=1.1.0
+openpyxl>=3.1.0
+Pillow>=10.0.0
+
+# --- Utilities ---
+python-dotenv==1.0.1
+pyyaml==6.0.2
+python-frontmatter==1.1.0
+
+# --- Testing (dev) ---
+pytest==8.3.4
+pytest-asyncio==0.25.0
