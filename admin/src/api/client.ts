@@ -92,7 +92,20 @@ export const knowledgeApi = {
   create: (data: { name: string; kb_type?: string; source_type?: string; source_path: string }) =>
     client.post('/knowledge', data),
   documents: (kbId: number) => client.get(`/knowledge/${kbId}/documents`),
-  sync: (kbId: number) => client.post(`/knowledge/${kbId}/sync`)
+  sync: (kbId: number) => client.post(`/knowledge/${kbId}/sync`),
+  importFile: (kbId: number, file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return client.post(`/knowledge/${kbId}/import`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000  // embedding large files can take a while
+    })
+  },
+  downloadTemplate: (kbId: number) =>
+    client.get(`/knowledge/${kbId}/import-template`, {
+      responseType: 'blob',
+      timeout: 30000
+    })
 }
 
 // ===== Memories =====

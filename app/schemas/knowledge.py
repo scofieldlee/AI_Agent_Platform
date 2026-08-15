@@ -43,3 +43,15 @@ class DocumentResponse(BaseModel):
     meta: dict
 
     model_config = {"from_attributes": True}
+
+
+class ExcelImportResponse(BaseModel):
+    """Result of importing an Excel/CSV file into a knowledge base."""
+    status: str = "completed"
+    knowledge_base_id: int
+    document_id: int
+    filename: str
+    action: str = "created"  # created / updated / skipped
+    sheets: list = Field(default_factory=list)
+    rows: int = 0
+    chunks: int = 0
