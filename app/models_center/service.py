@@ -103,16 +103,56 @@ class ModelService:
     ) -> BaseModelAdapter:
         """Get chat adapter for the requested model config.
 
-        If model_config_id is provided, load provider/config from DB and
-        instantiate the appropriate adapter. Otherwise return the default.
+        Resolution order:
+        1. model_config_id given -> load that provider/config from DB.
+        2. No id -> use the default chat config from Model Center (DB-stored
+           API key, managed via the admin UI).
+        3. DB unavailable / no default configured -> fall back to the
+           .env-based default adapter (settings.deepseek_api_key).
         """
+        from app.repositories.model_repo import get_default_model_config
+        from app.database.session import async_session_factory
+
         if not model_config_id:
+            # Prefer Model Center (database) over .env so the API key never
+            # needs to live in a file that risks being committed.
+            try:
+                async with async_session_factory() as db:
+                    config = await get_default_model_config(db, "chat")
+                    if (
+                        config
+                        and config.provider
+                        and config.provider.is_active
+                        and config.provider.api_key
+                    ):
+                        provider = config.provider
+                        adapter_cls = ADAPTER_REGISTRY.get(provider.code)
+                        if adapter_cls:
+                            adapter = adapter_cls(
+                                api_key=provider.api_key,
+                                base_url=provider.base_url,
+                                model_id=config.model_id,
+                            )
+                            logger.info(
+                                f"Default chat adapter resolved from Model Center | "
+                                f"provider={provider.code} model={config.model_id} "
+                                f"api_key={_mask_key(provider.api_key)}"
+                            )
+                            return adapter
+            except Exception as e:
+                logger.warning(
+                    f"Could not resolve default chat config from DB, "
+                    f"falling back to .env adapter: {e}"
+                )
+
             if not self._chat_adapter:
-                raise RuntimeError("No default chat adapter available")
+                raise RuntimeError(
+                    "No default chat adapter available. Set a default chat model "
+                    "in Model Center (admin UI) or configure DEEPSEEK_API_KEY in .env."
+                )
             return self._chat_adapter
 
         from app.repositories.model_repo import get_model_config
-        from app.database.session import async_session_factory
 
         async with async_session_factory() as db:
             config = await get_model_config(db, model_config_id)
