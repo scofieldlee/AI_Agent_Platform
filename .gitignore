@@ -36,6 +36,16 @@ dump.rdb
 docs/
 overview.md
 
+# Database dumps/exports (may contain API keys & real data)
+*.sql
+*.dump
+*.backup
+*.pg_dump
+*.sqlite
+*.sqlite3
+*.db
+*.rdb
+
 # Alembic
 alembic/versions/__pycache__/
 
