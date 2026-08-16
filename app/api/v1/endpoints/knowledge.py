@@ -4,19 +4,24 @@ import io
 import logging
 import os
 import uuid
+from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
 from app.auth.dependencies import require_permission
 from app.schemas.knowledge import (
-    KnowledgeBaseCreate, KnowledgeBaseResponse, DocumentResponse, ExcelImportResponse,
+    ChunkResponse, ChunkUpdate, DocumentContentUpdate, DocumentDetailResponse,
+    DocumentResponse, DocumentUpdate, ExcelImportResponse, KnowledgeBaseCreate,
+    KnowledgeBaseResponse,
 )
 from app.repositories.knowledge_repo import (
-    list_knowledge_bases, get_knowledge_base, create_knowledge_base, list_documents,
+    create_knowledge_base, delete_chunk, delete_document, get_chunk, get_document,
+    get_knowledge_base, list_chunks, list_documents, list_knowledge_bases,
+    replace_document_chunks, update_document,
 )
 
 router = APIRouter(dependencies=[Depends(require_permission("knowledge:view"))])
@@ -248,3 +253,233 @@ async def download_import_template_endpoint(kb_id: int, db: AsyncSession = Depen
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
     )
+
+
+# ----------------------------------------------------------------------------
+# Document / Chunk detail & edit endpoints
+# ----------------------------------------------------------------------------
+
+def _doc_to_detail(doc, chunks) -> DocumentDetailResponse:
+    """Convert a Document ORM object + chunk list to a DocumentDetailResponse."""
+    return DocumentDetailResponse(
+        id=doc.id,
+        title=doc.title,
+        source_path=doc.source_path,
+        source_type=doc.source_type,
+        status=doc.status,
+        chunk_count=doc.chunk_count,
+        meta=doc.meta or {},
+        created_at=doc.created_at.isoformat() if getattr(doc, "created_at", None) else None,
+        updated_at=doc.updated_at.isoformat() if getattr(doc, "updated_at", None) else None,
+        chunks=[ChunkResponse.model_validate(c) for c in chunks],
+    )
+
+
+async def _refresh_kb_counters(db: AsyncSession, kb_id: int) -> None:
+    """Recompute document_count / chunk_count on the knowledge base from the DB."""
+    from sqlalchemy import func, select
+    from app.models.knowledge import Document as DocumentModel, Chunk as ChunkModel
+
+    doc_count = await db.scalar(
+        select(func.count(DocumentModel.id)).where(DocumentModel.knowledge_base_id == kb_id)
+    ) or 0
+    chunk_count = await db.scalar(
+        select(func.count(ChunkModel.id))
+        .join(DocumentModel, ChunkModel.document_id == DocumentModel.id)
+        .where(DocumentModel.knowledge_base_id == kb_id)
+    ) or 0
+    kb = await get_knowledge_base(db, kb_id)
+    if kb:
+        kb.document_count = doc_count
+        kb.chunk_count = chunk_count
+        await db.flush()
+
+
+@router.get("/{kb_id}/documents/{doc_id}", response_model=DocumentDetailResponse)
+async def get_document_endpoint(
+    kb_id: int, doc_id: int, db: AsyncSession = Depends(get_db)
+):
+    """Return document metadata plus all its chunks (embedding vectors omitted)."""
+    doc = await get_document(db, kb_id, doc_id)
+    if not doc or doc.knowledge_base_id != kb_id:
+        raise HTTPException(status_code=404, detail="Document not found")
+    chunks = await list_chunks(db, doc_id)
+    return _doc_to_detail(doc, chunks)
+
+
+@router.patch(
+    "/{kb_id}/documents/{doc_id}", response_model=DocumentResponse,
+    dependencies=[Depends(require_permission("knowledge:manage"))],
+)
+async def update_document_endpoint(
+    kb_id: int, doc_id: int, payload: DocumentUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Partially update a document (title, metadata)."""
+    doc = await get_document(db, kb_id, doc_id)
+    if not doc or doc.knowledge_base_id != kb_id:
+        raise HTTPException(status_code=404, detail="Document not found")
+    fields = payload.model_dump(exclude_unset=True)
+    if not fields:
+        return doc
+    updated = await update_document(db, doc, fields)
+    await db.commit()
+    return updated
+
+
+@router.delete(
+    "/{kb_id}/documents/{doc_id}", status_code=204,
+    dependencies=[Depends(require_permission("knowledge:manage"))],
+)
+async def delete_document_endpoint(
+    kb_id: int, doc_id: int, db: AsyncSession = Depends(get_db)
+):
+    """Delete a document and all of its chunks (cascades via FK)."""
+    doc = await get_document(db, kb_id, doc_id)
+    if not doc or doc.knowledge_base_id != kb_id:
+        raise HTTPException(status_code=404, detail="Document not found")
+    await delete_document(db, doc)
+    await _refresh_kb_counters(db, kb_id)
+    await db.commit()
+    return None
+
+
+@router.patch(
+    "/{kb_id}/documents/{doc_id}/chunks/{chunk_id}", response_model=ChunkResponse,
+    dependencies=[Depends(require_permission("knowledge:manage"))],
+)
+async def update_chunk_endpoint(
+    kb_id: int, doc_id: int, chunk_id: int, payload: ChunkUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Edit a chunk's content and/or section. When content changes, the embedding
+    is regenerated automatically so retrieval keeps working."""
+    doc = await get_document(db, kb_id, doc_id)
+    if not doc or doc.knowledge_base_id != kb_id:
+        raise HTTPException(status_code=404, detail="Document not found")
+    chunk = await get_chunk(db, chunk_id)
+    if not chunk or chunk.document_id != doc_id:
+        raise HTTPException(status_code=404, detail="Chunk not found")
+
+    content_changed = "content" in payload.model_fields_set and payload.content is not None \
+        and payload.content != chunk.content
+    if "section" in payload.model_fields_set and payload.section is not None:
+        chunk.section = payload.section
+    if "content" in payload.model_fields_set and payload.content is not None:
+        chunk.content = payload.content
+
+    if content_changed:
+        # Regenerate the embedding using the Model Center
+        try:
+            from app.models_center.service import ModelService
+            embeddings = await ModelService().embed([chunk.content])
+            if embeddings and embeddings[0] is not None:
+                chunk.embedding = embeddings[0]
+                chunk.token_count = len(chunk.content)
+        except Exception as e:
+            logger.warning(f"Failed to regenerate embedding for chunk {chunk_id}: {e}")
+            # Content is saved; embedding regeneration can be retried by sync
+
+    await db.flush()
+    await db.refresh(chunk)
+    await db.commit()
+    return ChunkResponse.model_validate(chunk)
+
+
+@router.delete(
+    "/{kb_id}/documents/{doc_id}/chunks/{chunk_id}", status_code=204,
+    dependencies=[Depends(require_permission("knowledge:manage"))],
+)
+async def delete_chunk_endpoint(
+    kb_id: int, doc_id: int, chunk_id: int, db: AsyncSession = Depends(get_db)
+):
+    """Delete a single chunk from a document."""
+    doc = await get_document(db, kb_id, doc_id)
+    if not doc or doc.knowledge_base_id != kb_id:
+        raise HTTPException(status_code=404, detail="Document not found")
+    chunk = await get_chunk(db, chunk_id)
+    if not chunk or chunk.document_id != doc_id:
+        raise HTTPException(status_code=404, detail="Chunk not found")
+    await delete_chunk(db, chunk)
+    # Update doc.chunk_count locally; refresh KB counters at the end
+    doc.chunk_count = max(0, (doc.chunk_count or 1) - 1)
+    await db.flush()
+    await _refresh_kb_counters(db, kb_id)
+    await db.commit()
+    return None
+
+
+@router.put(
+    "/{kb_id}/documents/{doc_id}/content",
+    response_model=DocumentDetailResponse,
+    dependencies=[Depends(require_permission("knowledge:manage"))],
+)
+async def update_document_content_endpoint(
+    kb_id: int,
+    doc_id: int,
+    payload: DocumentContentUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace the full Markdown content of a document.
+
+    The content is re-split into chunks using the configured Markdown splitter,
+    embeddings are regenerated, and old chunks are replaced. The document's
+    content_hash is updated so subsequent Obsidian syncs can detect conflicts.
+    """
+    import hashlib
+
+    import frontmatter
+
+    doc = await get_document(db, kb_id, doc_id)
+    if not doc or doc.knowledge_base_id != kb_id:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    content = payload.content
+    if not content or not content.strip():
+        raise HTTPException(status_code=422, detail="内容不能为空")
+
+    # Build raw markdown (body + frontmatter) for hash / future sync comparison
+    meta = payload.meta if payload.meta is not None else (doc.meta or {})
+    raw_content = frontmatter.dumps(frontmatter.Post(content, **meta))
+    content_hash = hashlib.md5(raw_content.encode("utf-8")).hexdigest()
+
+    # Split into chunks
+    from app.knowledge.splitters.markdown_splitter import MarkdownSplitter
+    splitter = MarkdownSplitter()
+    chunks_data = splitter.split(
+        content=content,
+        metadata={
+            **meta,
+            "title": payload.title if payload.title is not None else doc.title,
+            "source_path": doc.source_path or "",
+        },
+    )
+    if not chunks_data:
+        raise HTTPException(status_code=422, detail="内容过短，无法生成有效分块")
+
+    # Generate embeddings
+    from app.models_center.service import ModelService
+    chunk_texts = [c["content"] for c in chunks_data]
+    try:
+        embeddings = await ModelService().embed(chunk_texts)
+    except Exception as e:
+        logger.error(f"Failed to regenerate embeddings for doc {doc_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Embedding 生成失败: {e}")
+
+    # Replace chunks and update document
+    await replace_document_chunks(
+        db,
+        doc,
+        content,
+        chunks_data,
+        embeddings,
+        content_hash,
+        title=payload.title,
+        meta=meta,
+    )
+    await _refresh_kb_counters(db, kb_id)
+    await db.commit()
+
+    # Return refreshed detail
+    chunks = await list_chunks(db, doc_id)
+    return _doc_to_detail(doc, chunks)

@@ -32,7 +32,8 @@
       <a-col :xs="24" :lg="16">
         <a-card :title="selectedKB ? `${selectedKB.name} - 文档列表` : '文档列表'">
           <a-table :columns="docColumns" :data-source="documents" :loading="docLoading" row-key="id"
-            :pagination="{ pageSize: 10 }" size="small">
+            :pagination="{ pageSize: 10 }" size="small"
+            :custom-row="(record: any) => ({ onClick: () => openDocDetail(record), style: 'cursor: pointer;' })">
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'status'">
                 <a-tag :color="record.status === 'ready' ? 'green' : 'orange'">{{ docStatusLabel(record.status) }}</a-tag>
@@ -94,6 +95,124 @@
         </a-alert>
       </div>
     </a-modal>
+    <!-- Document Detail Drawer -->
+    <a-drawer v-model:open="showDocDetail" width="860" :title="`文档详情 - ${docDetail?.title || ''}`"
+      :destroy-on-close="true" :footer-style="{ textAlign: 'right' }">
+      <a-spin :spinning="docDetailLoading">
+        <template v-if="docDetail">
+          <a-tabs v-model:active-key="docDetailTab">
+            <!-- Tab 1: Chunks (default) -->
+            <a-tab-pane key="chunks" :title="`分块内容 (${docDetail.chunks.length})`">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                <a-alert type="info" show-icon style="margin-bottom: 0; flex: 1; min-width: 260px;">
+                  <template #message>点击「编辑全文」可直接修改整篇文档，保存后自动重新分块并向量化</template>
+                </a-alert>
+                <a-button type="primary" @click="openFullContentEdit">编辑全文</a-button>
+              </div>
+              <a-table :data-source="docDetail.chunks" :pagination="{ pageSize: 10 }" size="small" row-key="id">
+                <a-table-column title="#" data-index="chunk_index" width="50" />
+                <a-table-column title="小节" data-index="section" width="140">
+                  <template #default="{ record }">
+                    <span style="color: #999;">{{ record.section || '-' }}</span>
+                  </template>
+                </a-table-column>
+                <a-table-column title="内容" ellipsis>
+                  <template #default="{ record }">
+                    <a-tooltip :title="record.content">
+                      <span>{{ record.content.slice(0, 100) }}{{ record.content.length > 100 ? '…' : '' }}</span>
+                    </a-tooltip>
+                  </template>
+                </a-table-column>
+                <a-table-column title="Token" data-index="token_count" width="70" />
+                <a-table-column title="操作" width="160">
+                  <template #default="{ record }">
+                    <a-button size="small" type="link" @click="openChunkEdit(record)">编辑</a-button>
+                    <a-popconfirm title="确定删除该分块？" ok-text="删除" cancel-text="取消"
+                      @confirm="deleteChunk(record)">
+                      <a-button size="small" type="link" danger>删除</a-button>
+                    </a-popconfirm>
+                  </template>
+                </a-table-column>
+              </a-table>
+            </a-tab-pane>
+
+            <!-- Tab 2: Basic info -->
+            <a-tab-pane key="info" title="基本信息">
+              <a-form layout="vertical" style="max-width: 600px;">
+                <a-form-item label="标题">
+                  <a-input v-model:value="docEdit.title" />
+                </a-form-item>
+                <a-form-item label="来源路径">
+                  <a-input v-model:value="docEdit.source_path" disabled />
+                </a-form-item>
+                <a-form-item label="来源类型">
+                  <a-tag>{{ docDetail.source_type }}</a-tag>
+                </a-form-item>
+                <a-form-item label="状态">
+                  <a-tag :color="docDetail.status === 'ready' ? 'green' : 'orange'">{{ docStatusLabel(docDetail.status) }}</a-tag>
+                </a-form-item>
+                <a-form-item label="分块数">{{ docDetail.chunk_count }}</a-form-item>
+                <a-form-item label="创建时间">{{ formatDate(docDetail.created_at) }}</a-form-item>
+                <a-form-item label="更新时间">{{ formatDate(docDetail.updated_at) }}</a-form-item>
+                <a-form-item>
+                  <a-button type="primary" :loading="docSaving" @click="saveDocBasic">保存修改</a-button>
+                </a-form-item>
+              </a-form>
+            </a-tab-pane>
+
+            <!-- Tab 3: Metadata -->
+            <a-tab-pane key="meta" title="元数据 (frontmatter)">
+              <p style="color: #999; margin-bottom: 8px;">JSON 格式，保存后会随文档一起展示给检索流程</p>
+              <a-textarea v-model:value="docEdit.metaJson" :auto-size="{ minRows: 8, maxRows: 16 }"
+                :status="docMetaError ? 'error' : ''" />
+              <div v-if="docMetaError" style="color: #ff4d4f; margin-top: 4px;">{{ docMetaError }}</div>
+              <div style="margin-top: 12px;">
+                <a-button type="primary" :loading="docSaving" @click="saveDocMeta">保存元数据</a-button>
+              </div>
+            </a-tab-pane>
+          </a-tabs>
+        </template>
+      </a-spin>
+      <template #footer>
+        <a-popconfirm title="确定删除整个文档及其所有分块？此操作不可恢复" ok-text="删除" cancel-text="取消"
+          @confirm="deleteDoc">
+          <a-button danger>删除整个文档</a-button>
+        </a-popconfirm>
+        <a-button style="margin-left: 8px;" @click="showDocDetail = false">关闭</a-button>
+      </template>
+    </a-drawer>
+
+    <!-- Edit Chunk Modal -->
+    <a-modal v-model:open="showChunkEdit" title="编辑分块" @ok="saveChunk" :confirm-loading="chunkSaving"
+      ok-text="保存">
+      <a-alert type="info" show-icon style="margin-bottom: 12px;">
+        <template #message>保存后会自动重新生成 embedding，检索会立即生效</template>
+      </a-alert>
+      <a-form layout="vertical">
+        <a-form-item label="小节">
+          <a-input v-model:value="chunkEdit.section" placeholder="可选，如：商品基础信息" />
+        </a-form-item>
+        <a-form-item label="内容">
+          <a-textarea v-model:value="chunkEdit.content" :auto-size="{ minRows: 8, maxRows: 20 }" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
+    <!-- Edit Full Content Modal -->
+    <a-modal v-model:open="showFullContentEdit" title="编辑全文" @ok="saveFullContent" :confirm-loading="fullContentSaving"
+      ok-text="保存并重新向量化" width="900">
+      <a-alert type="warning" show-icon style="margin-bottom: 12px;">
+        <template #message>保存后会按 Markdown 标题重新分块、重新生成 embedding，原分块将被替换</template>
+      </a-alert>
+      <a-form layout="vertical">
+        <a-form-item label="标题">
+          <a-input v-model:value="fullContentEdit.title" />
+        </a-form-item>
+        <a-form-item label="正文 (Markdown)">
+          <a-textarea v-model:value="fullContentEdit.content" :auto-size="{ minRows: 16, maxRows: 30 }" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
@@ -120,6 +239,25 @@ const importFiles = ref<any[]>([])
 const importResult = ref<any>(null)
 
 const createForm = reactive({ name: '', kb_type: 'faq', source_type: 'obsidian', source_path: '' })
+
+// Document detail drawer state
+const showDocDetail = ref(false)
+const docDetailLoading = ref(false)
+const docDetail = ref<any>(null)
+const docDetailTab = ref('chunks')
+const docSaving = ref(false)
+const docEdit = reactive({ title: '', source_path: '', metaJson: '' })
+const docMetaError = ref('')
+
+// Chunk edit modal state
+const showChunkEdit = ref(false)
+const chunkSaving = ref(false)
+const chunkEdit = reactive({ id: 0, section: '', content: '' })
+
+// Full content edit modal state
+const showFullContentEdit = ref(false)
+const fullContentSaving = ref(false)
+const fullContentEdit = reactive({ title: '', content: '' })
 
 const docColumns = [
   { title: '标题', dataIndex: 'title', key: 'title', ellipsis: true },
@@ -225,6 +363,151 @@ async function downloadTemplate() {
     URL.revokeObjectURL(url)
   } catch (e: any) {
     message.error('模板下载失败')
+  }
+}
+
+// -------- Document detail drawer --------
+async function openDocDetail(record: any) {
+  if (!selectedKB.value) return
+  docDetailTab.value = 'chunks'
+  showDocDetail.value = true
+  docDetailLoading.value = true
+  try {
+    const res = await knowledgeApi.documentDetail(selectedKB.value.id, record.id)
+    docDetail.value = res.data
+    docEdit.title = res.data.title
+    docEdit.source_path = res.data.source_path || ''
+    docEdit.metaJson = JSON.stringify(res.data.meta || {}, null, 2)
+    docMetaError.value = ''
+  } catch (e: any) {
+    message.error('文档详情加载失败')
+    showDocDetail.value = false
+  } finally { docDetailLoading.value = false }
+}
+
+async function saveDocBasic() {
+  if (!docDetail.value || !selectedKB.value) return
+  docSaving.value = true
+  try {
+    await knowledgeApi.updateDocument(selectedKB.value.id, docDetail.value.id, { title: docEdit.title })
+    docDetail.value.title = docEdit.title
+    message.success('标题已更新')
+    selectKB(selectedKB.value)  // refresh list
+  } finally { docSaving.value = false }
+}
+
+async function saveDocMeta() {
+  if (!docDetail.value || !selectedKB.value) return
+  let parsed: any
+  try {
+    parsed = JSON.parse(docEdit.metaJson || '{}')
+    if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
+      throw new Error('必须是 JSON 对象')
+    }
+  } catch (e: any) {
+    docMetaError.value = 'JSON 格式错误：' + (e.message || '解析失败')
+    return
+  }
+  docMetaError.value = ''
+  docSaving.value = true
+  try {
+    await knowledgeApi.updateDocument(selectedKB.value.id, docDetail.value.id, { meta: parsed })
+    docDetail.value.meta = parsed
+    message.success('元数据已更新')
+    selectKB(selectedKB.value)
+  } finally { docSaving.value = false }
+}
+
+async function deleteDoc() {
+  if (!docDetail.value || !selectedKB.value) return
+  try {
+    await knowledgeApi.deleteDocument(selectedKB.value.id, docDetail.value.id)
+    message.success('文档已删除')
+    showDocDetail.value = false
+    docDetail.value = null
+    selectKB(selectedKB.value)
+    fetchKBs()
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || '删除失败')
+  }
+}
+
+// -------- Full content edit --------
+function openFullContentEdit() {
+  if (!docDetail.value) return
+  fullContentEdit.title = docDetail.value.title
+  fullContentEdit.content = docDetail.value.chunks.map((c: any) => c.content).join('\n\n')
+  showFullContentEdit.value = true
+}
+
+async function saveFullContent() {
+  if (!docDetail.value || !selectedKB.value) return
+  if (!fullContentEdit.content.trim()) {
+    message.warning('正文内容不能为空')
+    return
+  }
+  fullContentSaving.value = true
+  try {
+    let meta: any
+    try {
+      meta = JSON.parse(docEdit.metaJson || '{}')
+    } catch {
+      meta = docDetail.value.meta || {}
+    }
+    const res = await knowledgeApi.updateDocumentContent(
+      selectedKB.value.id,
+      docDetail.value.id,
+      {
+        title: fullContentEdit.title,
+        content: fullContentEdit.content,
+        meta,
+      }
+    )
+    message.success(`全文已更新，共 ${res.data.chunks.length} 个分块（embedding 已重新生成）`)
+    showFullContentEdit.value = false
+    // Refresh detail and list
+    docDetail.value = res.data
+    docEdit.title = res.data.title
+    selectKB(selectedKB.value)
+    fetchKBs()
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || '全文保存失败')
+  } finally { fullContentSaving.value = false }
+}
+
+// -------- Chunk edit --------
+function openChunkEdit(record: any) {
+  chunkEdit.id = record.id
+  chunkEdit.section = record.section || ''
+  chunkEdit.content = record.content || ''
+  showChunkEdit.value = true
+}
+
+async function saveChunk() {
+  if (!docDetail.value || !selectedKB.value) return
+  chunkSaving.value = true
+  try {
+    await knowledgeApi.updateChunk(
+      selectedKB.value.id, docDetail.value.id, chunkEdit.id,
+      { content: chunkEdit.content, section: chunkEdit.section || null }
+    )
+    message.success('分块已更新（embedding 已重新生成）')
+    showChunkEdit.value = false
+    // refresh detail
+    await openDocDetail(docDetail.value)
+    fetchKBs()
+  } finally { chunkSaving.value = false }
+}
+
+async function deleteChunk(record: any) {
+  if (!docDetail.value || !selectedKB.value) return
+  try {
+    await knowledgeApi.deleteChunk(selectedKB.value.id, docDetail.value.id, record.id)
+    message.success('分块已删除')
+    await openDocDetail(docDetail.value)
+    fetchKBs()
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || '删除失败')
   }
 }
 

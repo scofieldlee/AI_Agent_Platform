@@ -2,7 +2,7 @@
 Knowledge base schemas.
 """
 
-from typing import Optional
+from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -43,6 +43,54 @@ class DocumentResponse(BaseModel):
     meta: dict
 
     model_config = {"from_attributes": True}
+
+
+class ChunkResponse(BaseModel):
+    """A chunk within a document (embedding vector omitted to keep payload light)."""
+    id: int
+    chunk_index: int
+    content: str
+    section: Optional[str] = None
+    token_count: Optional[int] = None
+    meta: dict = Field(default_factory=dict)
+
+    model_config = {"from_attributes": True}
+
+
+class DocumentDetailResponse(BaseModel):
+    """Document detail including its chunks."""
+    id: int
+    title: str
+    source_path: Optional[str] = None
+    source_type: str
+    status: str
+    chunk_count: int
+    meta: dict = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    chunks: List[ChunkResponse] = Field(default_factory=list)
+
+
+class DocumentUpdate(BaseModel):
+    """Editable fields of a document."""
+    title: Optional[str] = None
+    meta: Optional[dict] = None
+
+
+class ChunkUpdate(BaseModel):
+    """Editable fields of a chunk."""
+    content: Optional[str] = None
+    section: Optional[str] = None
+
+
+class DocumentContentUpdate(BaseModel):
+    """Update the full markdown content of a document.
+
+    The document will be re-chunked and re-embedded automatically.
+    """
+    content: str = Field(..., min_length=1, description="完整 Markdown 正文（不含 frontmatter）")
+    title: Optional[str] = Field(None, description="可选：同时更新文档标题")
+    meta: Optional[dict] = Field(None, description="可选：同时更新 frontmatter 元数据")
 
 
 class ExcelImportResponse(BaseModel):

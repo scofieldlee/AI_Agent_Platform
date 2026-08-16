@@ -92,6 +92,18 @@ export const knowledgeApi = {
   create: (data: { name: string; kb_type?: string; source_type?: string; source_path: string }) =>
     client.post('/knowledge', data),
   documents: (kbId: number) => client.get(`/knowledge/${kbId}/documents`),
+  documentDetail: (kbId: number, docId: number) =>
+    client.get(`/knowledge/${kbId}/documents/${docId}`),
+  updateDocument: (kbId: number, docId: number, payload: any) =>
+    client.patch(`/knowledge/${kbId}/documents/${docId}`, payload),
+  updateDocumentContent: (kbId: number, docId: number, payload: { content: string; title?: string; meta?: Record<string, any> }) =>
+    client.put(`/knowledge/${kbId}/documents/${docId}/content`, payload),
+  deleteDocument: (kbId: number, docId: number) =>
+    client.delete(`/knowledge/${kbId}/documents/${docId}`),
+  updateChunk: (kbId: number, docId: number, chunkId: number, payload: any) =>
+    client.patch(`/knowledge/${kbId}/documents/${docId}/chunks/${chunkId}`, payload),
+  deleteChunk: (kbId: number, docId: number, chunkId: number) =>
+    client.delete(`/knowledge/${kbId}/documents/${docId}/chunks/${chunkId}`),
   sync: (kbId: number) => client.post(`/knowledge/${kbId}/sync`),
   importFile: (kbId: number, file: File) => {
     const fd = new FormData()
