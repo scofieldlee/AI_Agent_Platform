@@ -56,6 +56,18 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'Agent 管理', icon: 'RobotOutlined', permission: 'agent:view' }
       },
       {
+        path: 'employees',
+        name: 'Employees',
+        component: () => import('@/views/Employees.vue'),
+        meta: { title: 'AI 员工', icon: 'UsergroupAddOutlined', permission: 'agent:view' }
+      },
+      {
+        path: 'employee-workbench',
+        name: 'EmployeeWorkbench',
+        component: () => import('@/views/EmployeeWorkbench.vue'),
+        meta: { title: 'AI 员工工作台', icon: 'ThunderboltOutlined', permission: 'agent:view' }
+      },
+      {
         path: 'models',
         name: 'Models',
         component: () => import('@/views/Models.vue'),

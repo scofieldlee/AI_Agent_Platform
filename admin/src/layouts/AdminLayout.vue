@@ -43,6 +43,14 @@
           <RobotOutlined />
           <span>Agent 管理</span>
         </a-menu-item>
+        <a-menu-item v-if="canSee('employees')" key="employees">
+          <UsergroupAddOutlined />
+          <span>AI 员工</span>
+        </a-menu-item>
+        <a-menu-item v-if="canSee('employee-workbench')" key="employee-workbench">
+          <ThunderboltOutlined />
+          <span>员工工作台</span>
+        </a-menu-item>
         <a-menu-item v-if="canSee('models')" key="models">
           <DatabaseOutlined />
           <span>模型中心</span>
@@ -133,6 +141,8 @@ import {
   BulbFilled,
   RobotOutlined,
   TeamOutlined,
+  UsergroupAddOutlined,
+  ThunderboltOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   LogoutOutlined,
@@ -185,6 +195,8 @@ const menuPermissions: Record<string, string> = {
   analytics: 'analytics:view',
   memories: 'memory:view',
   agents: 'agent:view',
+  employees: 'agent:view',
+  'employee-workbench': 'agent:view',
   models: 'model:view',
   workflow: 'agent:view',
   users: 'user:view',
@@ -227,6 +239,8 @@ const currentTitle = computed(() => {
     Analytics: '执行追踪',
     Memories: '记忆管理',
     Agents: 'Agent 管理',
+    Employees: 'AI 员工',
+    EmployeeWorkbench: '员工工作台',
     Models: '模型中心',
     Workflow: '工作流编排',
     Users: '用户管理',

@@ -180,6 +180,39 @@ export const modelsApi = {
   listConfigs: () => client.get('/models/configs'),
 }
 
+// ===== AI Employees =====
+export const employeeApi = {
+  list: (params?: { status?: string; keyword?: string }) =>
+    client.get('/ai-employees', { params }),
+  detail: (id: number) => client.get(`/ai-employees/${id}`),
+  create: (data: {
+    name: string; code: string; description?: string;
+    role?: string; goal?: string; role_prompt?: string;
+    orchestration_mode?: 'dag' | 'supervisor';
+    supervisor_agent_id?: number | null;
+    config?: Record<string, any>;
+  }) => client.post('/ai-employees', data),
+  update: (id: number, data: Record<string, any>) =>
+    client.put(`/ai-employees/${id}`, data),
+  remove: (id: number) => client.delete(`/ai-employees/${id}`),
+  publish: (id: number) => client.post(`/ai-employees/${id}/publish`),
+  disable: (id: number) => client.post(`/ai-employees/${id}/disable`),
+  bindings: (id: number) => client.get(`/ai-employees/${id}/agents`),
+  setBindings: (id: number, agents: Array<{
+    agent_id: number; role?: string; priority?: number;
+    enabled?: boolean; depends_on?: number[]; config?: Record<string, any>;
+  }>) => client.put(`/ai-employees/${id}/agents`, { agents }),
+  selectableAgents: () => client.get('/ai-employees/agents/selectable'),
+  execute: (id: number, data: { input: Record<string, any>; title?: string }) =>
+    client.post(`/ai-employees/${id}/execute`, data),
+  tasks: (params?: { status?: string; employee_id?: number; mine?: boolean; limit?: number }) =>
+    client.get('/ai-employees/tasks', { params }),
+  taskDetail: (taskId: number) => client.get(`/ai-employees/tasks/${taskId}`),
+  cancelTask: (taskId: number) => client.post(`/ai-employees/tasks/${taskId}/cancel`),
+  resumeTask: (taskId: number, data?: { human_feedback?: string }) =>
+    client.post(`/ai-employees/tasks/${taskId}/resume`, data)
+}
+
 // ===== Monitoring =====
 export const monitoringApi = {
   overview: () => client.get('/monitoring/overview'),

@@ -10,7 +10,7 @@ from app.core.config import settings
 from app.database.base import Base
 
 # Import all models so they are registered with Base.metadata
-from app.models import user, agent, workflow, knowledge, conversation, memory, tool, model_config  # noqa
+from app.models import user, agent, workflow, knowledge, conversation, memory, tool, model_config, ai_employee  # noqa
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_sync_url)

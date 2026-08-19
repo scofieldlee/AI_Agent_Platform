@@ -116,6 +116,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Redis connection failed: {e}")
 
+    # Recover orphan AI Employee tasks (running -> failed)
+    try:
+        from app.repositories import employee_repo
+        async with async_session_factory() as emp_db:
+            orphan_count = await employee_repo.fail_orphan_tasks(emp_db)
+            if orphan_count:
+                logger.warning(f"Recovered {orphan_count} orphan AI Employee tasks (marked as failed).")
+    except Exception as e:
+        logger.warning(f"AI Employee task recovery failed: {e}")
+
     logger.info(f"{settings.app_name} is ready!")
 
     yield
@@ -148,7 +158,7 @@ def create_app() -> FastAPI:
     )
 
     # --- Routes ---
-    from app.api.v1.endpoints import health, agents, conversations, knowledge, tools, analytics, memories, human_tasks, auth, workflow, monitoring, public, models
+    from app.api.v1.endpoints import health, agents, conversations, knowledge, tools, analytics, memories, human_tasks, auth, workflow, monitoring, public, models, ai_employees
 
     app.include_router(health.router, prefix="/api/v1", tags=["health"])
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
@@ -163,6 +173,7 @@ def create_app() -> FastAPI:
     app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monitoring"])
     app.include_router(models.router, prefix="/api/v1/models", tags=["models"])
     app.include_router(public.router, prefix="/api/v1/public", tags=["public"])
+    app.include_router(ai_employees.router, prefix="/api/v1/ai-employees", tags=["ai-employees"])
 
     # --- Static files ---
     static_dir = Path(__file__).parent.parent / "static"

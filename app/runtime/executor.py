@@ -328,3 +328,66 @@ class AgentRuntime:
         if confidence < 0.5 or state.get("need_human", False):
             return "human"
         return "end"
+
+    # ------------------------------------------------------------------
+    # Programmatic entry point for EmployeeRuntime (Method A adaptation)
+    # ------------------------------------------------------------------
+
+    async def execute_task(
+        self,
+        agent_id: int,
+        task_instruction: str,
+        user_id: Optional[int] = None,
+        tenant_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Programmatic execution entry point for EmployeeRuntime.
+
+        Reuses the full run() pipeline (Workflow -> LangGraph -> Trace),
+        wrapping the natural-language response into an AgentResult structure.
+
+        Key difference from run():
+        - conversation_id is None (no Conversation/Message records created)
+        - Returns structured AgentResult instead of raw response dict
+        - Memory extraction still runs (archived by agent_id / user_id)
+
+        Args:
+            agent_id: The Agent to execute.
+            task_instruction: Rendered instruction text for the Agent.
+            user_id: Optional user context for memory/trace.
+            tenant_id: Optional tenant context.
+
+        Returns:
+            AgentResult dict:
+                success: bool
+                summary: str (Agent's natural-language response)
+                data: dict (empty in MVP, reserved for structured output)
+                artifacts: dict
+                metadata: dict (intent, confidence, trace_id, need_human, ...)
+        """
+        context = AgentContext(
+            agent_id=agent_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            conversation_id=None,  # <-- no conversation record
+        )
+
+        result = await self.run(task_instruction, context)
+
+        # Determine success: need_human means Agent wants to escalate,
+        # which is a valid completion signal (not a failure)
+        success = not result.get("need_human", False)
+
+        return {
+            "success": success,
+            "summary": result.get("answer", ""),
+            "data": {},
+            "artifacts": {},
+            "metadata": {
+                "intent": result.get("intent"),
+                "confidence": result.get("confidence"),
+                "knowledge_sources": result.get("knowledge_sources", []),
+                "need_human": result.get("need_human", False),
+                "transfer_reason": result.get("transfer_reason"),
+                "trace_id": result.get("trace_id"),
+            },
+        }
