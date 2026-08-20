@@ -86,6 +86,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '用户管理', icon: 'TeamOutlined', permission: 'user:view' }
       },
       {
+        path: 'roles',
+        name: 'Roles',
+        component: () => import('@/views/Roles.vue'),
+        meta: { title: '角色权限', icon: 'SafetyOutlined', permission: 'user:manage' }
+      },
+      {
         path: 'monitoring',
         name: 'Monitoring',
         component: () => import('@/views/Monitoring.vue'),

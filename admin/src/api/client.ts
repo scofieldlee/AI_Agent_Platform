@@ -50,6 +50,16 @@ export const authApi = {
   logout: () => client.post('/auth/logout'),
   listUsers: () => client.get('/auth/users'),
   listRoles: () => client.get('/auth/roles'),
+  getRole: (id: number) => client.get(`/auth/roles/${id}`),
+  createRole: (data: {
+    code: string; name: string; description?: string; permission_codes: string[];
+  }) => client.post('/auth/roles', data),
+  updateRole: (id: number, data: {
+    name?: string; description?: string; permission_codes?: string[];
+  }) => client.patch(`/auth/roles/${id}`, data),
+  deleteRole: (id: number) => client.delete(`/auth/roles/${id}`),
+  listRoleUsers: (id: number) => client.get(`/auth/roles/${id}/users`),
+  listPermissions: () => client.get('/auth/permissions'),
   createUser: (data: {
     username: string; email: string; password: string;
     full_name?: string; department?: string; phone?: string;

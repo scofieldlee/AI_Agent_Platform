@@ -90,5 +90,58 @@ class RoleOut(BaseModel):
     code: str
     name: str
     description: Optional[str] = None
+    is_system: bool = False
+    user_count: int = 0
+    permission_count: int = 0
 
     model_config = {"from_attributes": True}
+
+
+class RoleDetailOut(BaseModel):
+    """Role detail with permissions."""
+
+    id: int
+    code: str
+    name: str
+    description: Optional[str] = None
+    is_system: bool = False
+    permissions: List[str] = []  # permission codes
+
+    model_config = {"from_attributes": True}
+
+
+class RoleCreateRequest(BaseModel):
+    """Create a new role with permissions."""
+
+    code: str = Field(..., min_length=2, max_length=50, pattern=r"^[a-z_][a-z0-9_]*$")
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    permission_codes: List[str] = Field(default=[], description="Permission codes to assign")
+
+
+class RoleUpdateRequest(BaseModel):
+    """Update role name/description/permissions."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = None
+    permission_codes: Optional[List[str]] = None
+
+
+class PermissionOut(BaseModel):
+    """Permission info for API responses."""
+
+    id: int
+    code: str
+    name: str
+    resource_type: str
+    action: str
+    description: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class PermissionGroupOut(BaseModel):
+    """Permissions grouped by resource type."""
+
+    resource_type: str
+    permissions: List[PermissionOut]

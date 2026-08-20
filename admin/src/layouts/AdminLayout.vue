@@ -63,6 +63,10 @@
           <TeamOutlined />
           <span>用户管理</span>
         </a-menu-item>
+        <a-menu-item v-if="canSee('roles')" key="roles">
+          <SafetyOutlined />
+          <span>角色权限</span>
+        </a-menu-item>
         <a-menu-item v-if="canSee('monitoring')" key="monitoring">
           <MonitorOutlined />
           <span>系统监控</span>
@@ -148,7 +152,8 @@ import {
   LogoutOutlined,
   ApartmentOutlined,
   MonitorOutlined,
-  DatabaseOutlined
+  DatabaseOutlined,
+  SafetyOutlined
 } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
@@ -200,6 +205,7 @@ const menuPermissions: Record<string, string> = {
   models: 'model:view',
   workflow: 'agent:view',
   users: 'user:view',
+  roles: 'user:manage',
   monitoring: 'system:config'
 }
 
@@ -244,6 +250,7 @@ const currentTitle = computed(() => {
     Models: '模型中心',
     Workflow: '工作流编排',
     Users: '用户管理',
+    Roles: '角色权限',
     Monitoring: '系统监控'
   }
   return map[name] || '仪表盘'
