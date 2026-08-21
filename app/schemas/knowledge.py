@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 class KnowledgeBaseCreate(BaseModel):
     """Create a new knowledge base."""
     name: str
-    code: str
+    # Auto-generated from kb_type + uuid when omitted by the client.
+    code: Optional[str] = None
     description: Optional[str] = None
     kb_type: str = "product"
     source_type: str = "obsidian"

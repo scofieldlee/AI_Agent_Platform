@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 
 # --- Config ---
 MODEL_NAME = "BAAI/bge-small-zh-v1.5"
+# Prefer a bundled local model copy when present (avoids HuggingFace download
+# on servers with restricted connectivity). Falls back to the hub name.
+MODEL_LOCAL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "bge-small-zh-v1.5")
+MODEL_SOURCE = MODEL_LOCAL_PATH if os.path.isdir(MODEL_LOCAL_PATH) else MODEL_NAME
 DEVICE = "cpu"  # Intel Mac: CPU only
 PORT = 8001
 
@@ -41,10 +45,10 @@ _model: SentenceTransformer = None
 def get_model() -> SentenceTransformer:
     global _model
     if _model is None:
-        logger.info(f"Loading embedding model: {MODEL_NAME}")
-        _model = SentenceTransformer(MODEL_NAME, device=DEVICE)
+        logger.info(f"Loading embedding model: {MODEL_SOURCE}")
+        _model = SentenceTransformer(MODEL_SOURCE, device=DEVICE)
         dim = _model.get_sentence_embedding_dimension()
-        logger.info(f"Model loaded: {MODEL_NAME} (dim={dim})")
+        logger.info(f"Model loaded: {MODEL_SOURCE} (dim={dim})")
     return _model
 
 

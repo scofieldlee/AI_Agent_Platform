@@ -16,11 +16,30 @@ client.interceptors.request.use((config) => {
 })
 
 // --- Response interceptor: handle 401 ---
+// Human-readable message extraction: FastAPI validation errors arrive as an
+// array of {loc, msg} objects — stringify them instead of "[object Object]".
+function extractErrorMessage(error: any): string {
+  const detail = error?.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d: any) => {
+        const field = Array.isArray(d?.loc) ? d.loc.filter((x: any) => x !== 'body').join('.') : ''
+        return field ? `${field}: ${d?.msg ?? JSON.stringify(d)}` : (d?.msg ?? JSON.stringify(d))
+      })
+      .join('；')
+  }
+  if (detail && typeof detail === 'object') {
+    try { return detail.message || JSON.stringify(detail) } catch { return '请求失败' }
+  }
+  return error?.message || '请求失败'
+}
+
 client.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error.response?.status
-    const msg = error.response?.data?.detail || error.message || '请求失败'
+    const msg = extractErrorMessage(error)
 
     if (status === 401) {
       // Token expired or not authenticated — redirect to login

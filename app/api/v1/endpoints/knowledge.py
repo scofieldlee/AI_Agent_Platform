@@ -9,6 +9,7 @@ from typing import List
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
@@ -130,10 +131,22 @@ async def list_knowledge_bases_endpoint(db: AsyncSession = Depends(get_db)):
 
 @router.post("", response_model=KnowledgeBaseResponse, status_code=201)
 async def create_knowledge_base_endpoint(data: KnowledgeBaseCreate, db: AsyncSession = Depends(get_db)):
-    """Create a new knowledge base."""
-    kb = await create_knowledge_base(db, data.model_dump())
-    await db.commit()
-    return kb
+    """Create a new knowledge base.
+
+    The `code` field is optional — auto-generated from kb_type + a random
+    suffix when the client doesn't provide one (keeps the unique constraint).
+    """
+    payload = data.model_dump()
+    if not payload.get("code") or not payload["code"].strip():
+        payload["code"] = f"kb_{payload.get('kb_type', 'general')}_{uuid.uuid4().hex[:8]}"
+
+    try:
+        kb = await create_knowledge_base(db, payload)
+        await db.commit()
+        return kb
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=f"知识库编码已存在: {payload['code']}")
 
 
 @router.get("/{kb_id}/documents", response_model=List[DocumentResponse])

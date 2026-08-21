@@ -16,6 +16,27 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Candidate subdirectories per KB type — first existing one wins.
+# Supports both the original Obsidian vault layout and simple English layouts
+# (e.g. <source_path>/product, <source_path>/QA). Falls back to scanning the
+# whole source path when none of the candidates exist.
+_SCAN_DIR_CANDIDATES = {
+    "product": ("2-领域/商品知识库/商品档案", "product", "products"),
+    "qa": ("2-领域/商品知识库/商品QA", "QA", "qa"),
+    "parameter": ("2-领域/商品知识库/商品参数", "parameter", "parameters"),
+}
+
+
+def _resolve_scan_subdir(vault_path, kb_type: str) -> Optional[str]:
+    """Return the subdirectory to scan for this KB type, or None for root."""
+    from pathlib import Path
+
+    root = Path(vault_path)
+    for candidate in _SCAN_DIR_CANDIDATES.get(kb_type, ()):
+        if (root / candidate).is_dir():
+            return candidate
+    return None
+
 
 class KnowledgeSyncService:
     """Syncs knowledge from source (Obsidian) to vector database.
@@ -70,15 +91,13 @@ class KnowledgeSyncService:
             from app.knowledge.loaders.obsidian_loader import ObsidianLoader
             loader = ObsidianLoader(kb.source_path)
 
-            # Determine subdirectory based on KB type
-            if kb.kb_type == "product":
-                documents = loader.get_product_documents()
-            elif kb.kb_type == "qa":
-                documents = loader.get_qa_documents()
-            elif kb.kb_type == "parameter":
-                documents = loader.get_parameter_documents()
+            # Determine subdirectory based on KB type (flexible layout)
+            subdir = _resolve_scan_subdir(loader.vault_path, kb.kb_type)
+            documents = loader.scan(subdir=subdir)
+            if subdir:
+                logger.info(f"KB type '{kb.kb_type}' resolves to subdirectory: {subdir}")
             else:
-                documents = loader.scan()
+                logger.info(f"KB type '{kb.kb_type}' scans the whole source path")
 
             stats["documents_scanned"] = len(documents)
             logger.info(f"Loaded {len(documents)} documents from source")

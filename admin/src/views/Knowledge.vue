@@ -57,11 +57,13 @@
           <a-select v-model:value="createForm.kb_type">
             <a-select-option value="faq">FAQ</a-select-option>
             <a-select-option value="product">产品文档</a-select-option>
+            <a-select-option value="qa">商品QA</a-select-option>
+            <a-select-option value="parameter">商品参数</a-select-option>
             <a-select-option value="general">通用</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="来源路径">
-          <a-input v-model:value="createForm.source_path" placeholder="/path/to/obsidian/vault" />
+        <a-form-item label="来源路径" extra="服务器上存放 Markdown 文档的绝对目录。产品文档/商品QA/商品参数类型会自动扫描该目录下同名子目录（如 product/QA/parameter），通用类型扫描整个目录。">
+          <a-input v-model:value="createForm.source_path" placeholder="例如 /opt/ai_agent_platform/knowledge_docs" />
         </a-form-item>
       </a-form>
     </a-modal>
