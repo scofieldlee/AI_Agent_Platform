@@ -136,10 +136,10 @@ npm run dev   # http://localhost:5173
 
 | 入口 | 地址 |
 | --- | --- |
-| 管理后台 | http://localhost:5173 |
-| API 文档 (Swagger) | http://localhost:8000/docs |
-| API 文档 (ReDoc) | http://localhost:8000/redoc |
-| 终端对话页 | http://localhost:8000/chat?token=xxxxxxxx |
+| 管理后台 | http://ai.leeare.top |
+| API 文档 (Swagger) | http://ai.leeare.top/docs |
+| API 文档 (ReDoc) | http://ai.leeare.top/redoc |
+| 终端对话页 | http://ai.leeare.top/chat?token=xxxxxxxx |
 
 ---
 
