@@ -198,8 +198,7 @@ import {
   DeleteOutlined,
   CheckCircleOutlined,
 } from '@ant-design/icons-vue'
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+import { modelsApi } from '@/api/client'
 
 interface Provider {
   id: number
@@ -336,13 +335,10 @@ function maskKey(key: string) {
 async function fetchProviders() {
   loadingProviders.value = true
   try {
-    const res = await fetch(`${API_BASE}/models/providers?include_inactive=true`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('access_token') || ''}` },
-    })
-    if (!res.ok) throw new Error(await res.text())
-    providers.value = await res.json()
+    const { data } = await modelsApi.listProviders({ include_inactive: true })
+    providers.value = data
   } catch (e: any) {
-    message.error(`加载提供商失败: ${e.message}`)
+    message.error(`加载提供商失败: ${extractError(e)}`)
   } finally {
     loadingProviders.value = false
   }
@@ -351,16 +347,22 @@ async function fetchProviders() {
 async function fetchConfigs() {
   loadingConfigs.value = true
   try {
-    const res = await fetch(`${API_BASE}/models/configs?include_inactive=true`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('access_token') || ''}` },
-    })
-    if (!res.ok) throw new Error(await res.text())
-    configs.value = await res.json()
+    const { data } = await modelsApi.listConfigs({ include_inactive: true })
+    configs.value = data
   } catch (e: any) {
-    message.error(`加载模型配置失败: ${e.message}`)
+    message.error(`加载模型配置失败: ${extractError(e)}`)
   } finally {
     loadingConfigs.value = false
   }
+}
+
+function extractError(e: any): string {
+  const detail = e?.response?.data?.detail
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail.map((d: any) => d.msg || JSON.stringify(d)).join('；')
+  }
+  return e?.message || '请求失败'
 }
 
 function resetProviderForm() {
@@ -417,33 +419,31 @@ function openConfigDrawer(record?: ModelConfig) {
   configDrawerOpen.value = true
 }
 
+function normalizeProviderCode(code: string): string {
+  // 后端仅允许小写字母、数字、下划线
+  return code.toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '')
+}
+
 async function saveProvider() {
+  providerForm.code = normalizeProviderCode(providerForm.code)
   if (!providerForm.name || !providerForm.code || !providerForm.base_url || !providerForm.api_key) {
     message.warning('请填写完整的提供商信息')
     return
   }
   savingProvider.value = true
   try {
-    const url = `${API_BASE}/models/providers${providerForm.id ? `/${providerForm.id}` : ''}`
-    const method = providerForm.id ? 'PATCH' : 'POST'
     const body = { ...providerForm }
+    delete (body as any).id
     if (providerForm.id) {
-      delete (body as any).id
+      await modelsApi.updateProvider(providerForm.id, body)
+    } else {
+      await modelsApi.createProvider(body)
     }
-    const res = await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('access_token') || ''}`,
-      },
-      body: JSON.stringify(body),
-    })
-    if (!res.ok) throw new Error(await res.text())
     message.success(providerForm.id ? '更新成功' : '添加成功')
     providerDrawerOpen.value = false
     await fetchProviders()
   } catch (e: any) {
-    message.error(`保存失败: ${e.message}`)
+    message.error(`保存失败: ${extractError(e)}`)
   } finally {
     savingProvider.value = false
   }
@@ -451,16 +451,12 @@ async function saveProvider() {
 
 async function deleteProvider(id: number) {
   try {
-    const res = await fetch(`${API_BASE}/models/providers/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${localStorage.getItem('access_token') || ''}` },
-    })
-    if (!res.ok) throw new Error(await res.text())
+    await modelsApi.deleteProvider(id)
     message.success('删除成功')
     await fetchProviders()
     await fetchConfigs()
   } catch (e: any) {
-    message.error(`删除失败: ${e.message}`)
+    message.error(`删除失败: ${extractError(e)}`)
   }
 }
 
@@ -471,32 +467,24 @@ async function saveConfig() {
   }
   savingConfig.value = true
   try {
-    const url = `${API_BASE}/models/configs${configForm.id ? `/${configForm.id}` : ''}`
-    const method = configForm.id ? 'PATCH' : 'POST'
     const body: any = { ...configForm }
-    if (configForm.id) {
-      delete body.id
-    }
+    delete body.id
     if (body.input_cost_per_1k === null || body.input_cost_per_1k === undefined) {
       delete body.input_cost_per_1k
     }
     if (body.output_cost_per_1k === null || body.output_cost_per_1k === undefined) {
       delete body.output_cost_per_1k
     }
-    const res = await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('access_token') || ''}`,
-      },
-      body: JSON.stringify(body),
-    })
-    if (!res.ok) throw new Error(await res.text())
+    if (configForm.id) {
+      await modelsApi.updateConfig(configForm.id, body)
+    } else {
+      await modelsApi.createConfig(body)
+    }
     message.success(configForm.id ? '更新成功' : '添加成功')
     configDrawerOpen.value = false
     await fetchConfigs()
   } catch (e: any) {
-    message.error(`保存失败: ${e.message}`)
+    message.error(`保存失败: ${extractError(e)}`)
   } finally {
     savingConfig.value = false
   }
@@ -504,29 +492,21 @@ async function saveConfig() {
 
 async function deleteConfig(id: number) {
   try {
-    const res = await fetch(`${API_BASE}/models/configs/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${localStorage.getItem('access_token') || ''}` },
-    })
-    if (!res.ok) throw new Error(await res.text())
+    await modelsApi.deleteConfig(id)
     message.success('删除成功')
     await fetchConfigs()
   } catch (e: any) {
-    message.error(`删除失败: ${e.message}`)
+    message.error(`删除失败: ${extractError(e)}`)
   }
 }
 
 async function setDefault(id: number) {
   try {
-    const res = await fetch(`${API_BASE}/models/configs/${id}/set-default`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${localStorage.getItem('access_token') || ''}` },
-    })
-    if (!res.ok) throw new Error(await res.text())
+    await modelsApi.setDefaultConfig(id)
     message.success('已设为默认')
     await fetchConfigs()
   } catch (e: any) {
-    message.error(`设置失败: ${e.message}`)
+    message.error(`设置失败: ${extractError(e)}`)
   }
 }
 

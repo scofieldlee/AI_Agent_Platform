@@ -41,6 +41,14 @@ def _load_adapter_registry():
     except Exception as e:
         logger.warning(f"Failed to load DeepSeek adapter: {e}")
 
+    try:
+        from app.models_center.adapters.qwen import QwenAdapter
+        # Register aliases so any reasonable provider code works
+        for code in ("qwen", "dashscope", "qwen37_flash", "qwen_flash"):
+            ADAPTER_REGISTRY[code] = QwenAdapter
+    except Exception as e:
+        logger.warning(f"Failed to load Qwen adapter: {e}")
+
 
 def _mask_key(key: str) -> str:
     """Mask API key for logging."""
@@ -269,6 +277,42 @@ class ModelService:
             model_config_id=model_config_id,
         )
 
+    async def _get_vision_fallback_adapter(self) -> Optional[BaseModelAdapter]:
+        """Find a vision-capable adapter among active Model Center configs.
+
+        Scans all active chat configs and returns the first one whose
+        adapter reports supports_vision (e.g., qwen-vl-*, gpt-4o, omni).
+        Used as automatic fallback when an agent is bound to a text-only
+        model but the user sends image attachments.
+        """
+        from app.repositories.model_repo import list_model_configs
+        from app.database.session import async_session_factory
+
+        try:
+            async with async_session_factory() as db:
+                configs = await list_model_configs(db, include_inactive=False)
+                for config in configs:
+                    provider = config.provider
+                    if not provider or not provider.is_active or not provider.api_key:
+                        continue
+                    adapter_cls = ADAPTER_REGISTRY.get(provider.code)
+                    if not adapter_cls:
+                        continue
+                    adapter = adapter_cls(
+                        api_key=provider.api_key,
+                        base_url=provider.base_url,
+                        model_id=config.model_id,
+                    )
+                    if getattr(adapter, "supports_vision", False):
+                        logger.info(
+                            f"Vision fallback adapter resolved | config_id={config.id} "
+                            f"provider={provider.code} model={config.model_id}"
+                        )
+                        return adapter
+        except Exception as e:
+            logger.warning(f"Vision fallback adapter lookup failed: {e}")
+        return None
+
     async def chat_with_images(
         self,
         system_prompt: str,
@@ -297,6 +341,17 @@ class ModelService:
         does not support images, falls back to text-only with a notice.
         """
         adapter = await self._get_chat_adapter(model_config_id)
+
+        # Check if adapter supports vision; if not, try an automatic
+        # fallback to any vision-capable config in the Model Center
+        # (e.g., agent bound to qwen3.7-flash but qwen-vl-max configured).
+        if not (hasattr(adapter, "chat_with_images") and getattr(adapter, "supports_vision", False)):
+            vision_adapter = await self._get_vision_fallback_adapter()
+            if vision_adapter is not None:
+                logger.info(
+                    "Chat adapter does not support images; using vision fallback adapter."
+                )
+                adapter = vision_adapter
 
         # Check if adapter supports vision
         if hasattr(adapter, "chat_with_images") and getattr(adapter, "supports_vision", False):

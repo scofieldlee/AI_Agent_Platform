@@ -212,10 +212,11 @@ async def tool_node(state: AgentState) -> Dict[str, Any]:
     # Define which intents trigger which tools
     TOOL_MAP = {
         "order_query": ["order_query", "logistics_query"],
-        "product_info": ["product_query", "inventory_query"],
-        "product_compare": ["product_query", "inventory_query"],
-        "purchase_advice": ["product_query", "inventory_query"],
+        "product_info": ["product_query", "inventory_query", "multimodal_kb_search"],
+        "product_compare": ["product_query", "inventory_query", "multimodal_kb_search"],
+        "purchase_advice": ["product_query", "inventory_query", "multimodal_kb_search"],
         "after_sale": ["refund_query", "logistics_query", "order_query"],
+        "knowledge_search": ["multimodal_kb_search"],
     }
 
     tools_to_run = TOOL_MAP.get(intent, [])
@@ -247,6 +248,20 @@ async def tool_node(state: AgentState) -> Dict[str, Any]:
                 params = {"query": user_input}
             elif tool_name == "logistics_query":
                 params = {"query": user_input}
+            elif tool_name == "multimodal_kb_search":
+                params = {"query": user_input, "max_results": 5}
+                # Pass user-uploaded images to enable image/fused retrieval
+                for att in state.get("attachments", []) or []:
+                    if att.get("type") == "image" and att.get("content"):
+                        mime = att.get("meta", {}).get("mime_type", "image/jpeg")
+                        ext = mime.split("/")[-1].replace("jpeg", "jpg")
+                        params["image_base64"] = att["content"]
+                        params["image_ext"] = ext
+                        logger.info(
+                            f"multimodal_kb_search: image attachment passed "
+                            f"for image/fused retrieval (ext={ext})"
+                        )
+                        break
             else:
                 params = {"query": user_input, "max_results": 5}
 
@@ -287,6 +302,11 @@ async def tool_node(state: AgentState) -> Dict[str, Any]:
                 formatted["trackings"] = data.get("trackings", [])
                 formatted["total"] = data.get("total", 0)
                 formatted["message"] = data.get("message", "")
+            elif tool_name == "multimodal_kb_search":
+                formatted["assets"] = data.get("assets", [])
+                formatted["total"] = data.get("total", 0)
+                formatted["knowledge_base_id"] = data.get("knowledge_base_id")
+                formatted["query_type"] = data.get("query_type", "text")
 
             logger.info(
                 f"Tool executed: {tool_name} | "
@@ -418,6 +438,28 @@ async def llm_node(state: AgentState) -> Dict[str, Any]:
                 if tr.get("message"):
                     tool_parts.append(f"退款查询提示：{tr['message']}")
 
+            # Format multimodal knowledge base results
+            elif tool_name == "multimodal_kb_search":
+                mode = tr.get("query_type", "text")
+                mode_label = {
+                    "text": "文本检索",
+                    "image": "以图搜图",
+                    "text+image": "图文融合检索",
+                }.get(mode, mode)
+                if tr.get("assets"):
+                    tool_parts.append(f"（多模态知识库·{mode_label}结果：）")
+                    for a in tr["assets"]:
+                        tags_str = "、".join(a.get("tags", [])) if a.get("tags") else ""
+                        tag_str = f"，标签：{tags_str}" if tags_str else ""
+                        desc_str = a.get("description") or a.get("content") or ""
+                        tool_parts.append(
+                            f"多模态素材：{a.get('asset_name')}（类型：{a.get('asset_type')}）"
+                            f"{tag_str}，相关度 {a.get('score')}\n"
+                            f"内容：{str(desc_str)[:300]}"
+                        )
+                else:
+                    tool_parts.append("多模态知识库中未检索到相关素材。")
+
             # Format logistics tracking results
             elif tool_name == "logistics_query" and tr.get("trackings"):
                 for t in tr["trackings"]:
@@ -454,7 +496,7 @@ async def llm_node(state: AgentState) -> Dict[str, Any]:
     if knowledge_context:
         context_parts.append(f"知识上下文（产品文档）：\n{knowledge_context}")
     if tool_context:
-        context_parts.append(f"业务数据（订单/库存/退款/物流查询结果）：\n{tool_context}")
+        context_parts.append(f"业务数据（订单/库存/退款/物流/多模态知识库查询结果）：\n{tool_context}")
     if not context_parts:
         context_parts.append("未检索到相关知识。")
 

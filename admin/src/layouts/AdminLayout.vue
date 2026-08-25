@@ -13,7 +13,7 @@
         <span v-else style="font-size: 24px;">⚡</span>
       </div>
 
-      <a-menu v-model:selectedKeys="selectedKeys" theme="dark" mode="inline" @click="onMenuClick"
+      <a-menu v-model:selectedKeys="selectedKeys" v-model:openKeys="openKeys" theme="dark" mode="inline" @click="onMenuClick"
         style="background: transparent; border: none;">
         <a-menu-item v-if="canSee('dashboard')" key="dashboard">
           <DashboardOutlined />
@@ -71,6 +71,28 @@
           <MonitorOutlined />
           <span>系统监控</span>
         </a-menu-item>
+        <a-sub-menu v-if="canSee('multimodal/kbs')" key="multimodal">
+          <template #title>
+            <PictureOutlined />
+            <span>多模态知识库</span>
+          </template>
+          <a-menu-item key="multimodal/kbs">
+            <DatabaseOutlined />
+            <span>知识库</span>
+          </a-menu-item>
+          <a-menu-item key="multimodal/assets">
+            <AppstoreOutlined />
+            <span>素材库</span>
+          </a-menu-item>
+          <a-menu-item key="multimodal/tasks">
+            <ThunderboltOutlined />
+            <span>处理任务</span>
+          </a-menu-item>
+          <a-menu-item key="multimodal/search">
+            <SearchOutlined />
+            <span>检索测试</span>
+          </a-menu-item>
+        </a-sub-menu>
       </a-menu>
     </a-layout-sider>
 
@@ -153,7 +175,10 @@ import {
   ApartmentOutlined,
   MonitorOutlined,
   DatabaseOutlined,
-  SafetyOutlined
+  SafetyOutlined,
+  PictureOutlined,
+  AppstoreOutlined,
+  SearchOutlined
 } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
@@ -166,7 +191,24 @@ const collapsed = ref(false)
 
 const isDark = computed(() => themeStore.isDark)
 
-const selectedKeys = ref<string[]>([route.name as string || 'dashboard'])
+// 路由名 → 菜单 key（多模态子页统一高亮对应菜单项）
+// 注意：必须在 selectedKeys/openKeys 初始化之前声明，否则 TDZ 报错
+const routeNameToMenuKey: Record<string, string> = {
+  MultimodalKB: 'multimodal/kbs',
+  MultimodalAssets: 'multimodal/assets',
+  MultimodalUpload: 'multimodal/assets',
+  MultimodalAssetDetail: 'multimodal/assets',
+  MultimodalTasks: 'multimodal/tasks',
+  MultimodalSearch: 'multimodal/search'
+}
+
+function menuKeyForRoute(name: string | null): string {
+  if (!name) return 'dashboard'
+  return routeNameToMenuKey[name] || name
+}
+
+const selectedKeys = ref<string[]>([menuKeyForRoute(route.name as string)])
+const openKeys = ref<string[]>(menuKeyForRoute(route.name as string).startsWith('multimodal') ? ['multimodal'] : [])
 
 // --- Dynamic styles based on theme ---
 const siderStyle = computed(() => isDark.value
@@ -206,8 +248,14 @@ const menuPermissions: Record<string, string> = {
   workflow: 'agent:view',
   users: 'user:view',
   roles: 'user:manage',
-  monitoring: 'system:config'
+  monitoring: 'system:config',
+  'multimodal/kbs': 'multimodal:view',
+  'multimodal/assets': 'multimodal:view',
+  'multimodal/tasks': 'multimodal:view',
+  'multimodal/search': 'multimodal:view'
 }
+
+// 路由名 → 菜单 key 的映射与 menuKeyForRoute 已前移至 selectedKeys 初始化之前（避免 TDZ）
 
 function canSee(key: string): boolean {
   const perm = menuPermissions[key]
@@ -251,13 +299,19 @@ const currentTitle = computed(() => {
     Workflow: '工作流编排',
     Users: '用户管理',
     Roles: '角色权限',
-    Monitoring: '系统监控'
+    Monitoring: '系统监控',
+    MultimodalKB: '多模态知识库',
+    MultimodalAssets: '多模态素材库',
+    MultimodalUpload: '素材上传',
+    MultimodalAssetDetail: '素材详情',
+    MultimodalTasks: '处理任务',
+    MultimodalSearch: '多模态检索'
   }
   return map[name] || '仪表盘'
 })
 
 watch(() => route.name, (newName) => {
-  if (newName) selectedKeys.value = [newName as string]
+  selectedKeys.value = [menuKeyForRoute(newName as string | null)]
 })
 
 function onMenuClick({ key }: { key: string }) {

@@ -11,6 +11,7 @@ import signal
 from typing import Optional
 
 from app.database.session import async_session_factory
+import app.models  # noqa: F401  # 确保 User 等业务表进入 Base.metadata（mm_asset_tags.created_by 外键解析）
 from app.multimodal.constants import TaskStatus, TaskType, FileType
 from app.multimodal.services import task_queue_service
 
@@ -71,6 +72,8 @@ async def execute_task(task_id: int) -> None:
         except Exception as e:
             logger.error(f"Task {task_id} crashed: {e}", exc_info=True)
             try:
+                # 崩溃后 session 可能处于失败状态，先回滚再标记失败
+                await db.rollback()
                 await task_queue_service.mark_failed(db, task_id, f"{type(e).__name__}: {e}")
                 await db.commit()
                 # 查询 retry 信息决定是否重试
@@ -78,8 +81,8 @@ async def execute_task(task_id: int) -> None:
                 t = await processing_repo.get_task(db, task_id)
                 if t and t.retry_count <= MAX_RETRY:
                     await _retry_later(task_id)
-            except Exception:
-                pass
+            except Exception as retry_err:
+                logger.error(f"Task {task_id} mark_failed also failed: {retry_err}")
 
 
 async def _retry_later(task_id: int, delay_key: str = "retry") -> None:

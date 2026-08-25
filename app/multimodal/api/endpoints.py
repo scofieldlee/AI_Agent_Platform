@@ -7,7 +7,7 @@
 import logging
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +19,7 @@ from app.multimodal.schemas import (
     AssetListParams, AssetListResponse, AssetDetailResponse, AssetUpdate,
     AssetUserMetadataUpdate, TagAddRequest, UploadResponse,
     RelationCreate, ApproveRequest, BatchAnalyzeRequest,
-    ProcessingTaskListResponse, SearchRequest, SearchResponse,
+    ProcessingTaskListResponse, SearchResponse,
 )
 from app.multimodal.repositories import (
     knowledge_base_repo, asset_repo, processing_repo,
@@ -134,7 +134,7 @@ async def upload_assets(knowledge_base_id: int = Query(...),
                         db: AsyncSession = Depends(get_db),
                         current_user=Depends(get_current_user)):
     """批量上传素材（multipart）。上传后自动入队 AI 分析。"""
-    kb = await knowledge_base_repo.get_kb(db, kb_id)
+    kb = await knowledge_base_repo.get_kb(db, knowledge_base_id)
     if not kb:
         raise HTTPException(404, "知识库不存在")
 
@@ -142,7 +142,7 @@ async def upload_assets(knowledge_base_id: int = Query(...),
     for f in files:
         data = await f.read()
         result = await asset_service.upload_asset(
-            db, kb_id, f.filename or "unnamed", data, current_user.id)
+            db, knowledge_base_id, f.filename or "unnamed", data, current_user.id)
         items.append(result)
     await db.commit()
 
@@ -430,21 +430,35 @@ async def list_tags(db: AsyncSession = Depends(get_db)):
 # ============================================================
 
 @router.post("/search", response_model=SearchResponse, dependencies=[ViewPerm])
-async def multimodal_search(data: SearchRequest,
-                            query_image: Optional[UploadFile] = File(None),
-                            db: AsyncSession = Depends(get_db)):
-    """多模态检索: 文本 / 图片（以图搜图）/ 文本+图片 融合。"""
+async def multimodal_search(
+        knowledge_base_id: int = Form(...),
+        query: Optional[str] = Form(None),
+        asset_types: Optional[str] = Form(None),   # 逗号分隔: image,video
+        top_k: int = Form(10, ge=1, le=100),
+        min_score: float = Form(0.0, ge=0.0, le=1.0),
+        query_image: Optional[UploadFile] = File(None),
+        db: AsyncSession = Depends(get_db)):
+    """多模态检索: 文本 / 图片（以图搜图）/ 文本+图片 融合。
+
+    统一使用 multipart/form-data（Form + File），前端两种场景均以表单提交。
+    """
     image_bytes, image_ext = None, "jpg"
     if query_image is not None:
         image_bytes = await query_image.read()
         ext = (query_image.filename or "img.jpg").rsplit(".", 1)[-1].lower()
         image_ext = ext if ext in ("jpg", "jpeg", "png", "webp", "bmp") else "jpg"
 
-    result = await search_service.search(
-        db, knowledge_base_id=data.knowledge_base_id, query=data.query,
-        query_image_data=image_bytes, query_image_ext=image_ext,
-        asset_types=data.asset_types or None, top_k=data.top_k,
-        min_score=data.min_score)
+    types = [t.strip() for t in (asset_types or "").split(",") if t.strip()]
+    try:
+        result = await search_service.search(
+            db, knowledge_base_id=knowledge_base_id, query=query,
+            query_image_data=image_bytes, query_image_ext=image_ext,
+            asset_types=types or None, top_k=top_k, min_score=min_score)
+    except RuntimeError as e:
+        # 模型/Embedding 客户端未配置（如 DASHSCOPE_API_KEY 缺失）→ 优雅降级为 400
+        raise HTTPException(400, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     if "error" in result:
         raise HTTPException(400, result["error"])
     return result
@@ -454,7 +468,12 @@ async def multimodal_search(data: SearchRequest,
 async def similar_assets(asset_id: int, top_k: int = Query(10, ge=1, le=50),
                          db: AsyncSession = Depends(get_db)):
     """以图搜图：基于指定素材找相似素材。"""
-    result = await search_service.search_by_asset(db, asset_id, top_k)
+    try:
+        result = await search_service.search_by_asset(db, asset_id, top_k)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return result
 
 

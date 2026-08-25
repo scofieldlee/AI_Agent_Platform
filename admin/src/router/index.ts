@@ -96,6 +96,42 @@ const routes: RouteRecordRaw[] = [
         name: 'Monitoring',
         component: () => import('@/views/Monitoring.vue'),
         meta: { title: '系统监控', icon: 'MonitorOutlined', permission: 'system:config' }
+      },
+      {
+        path: 'multimodal/kbs',
+        name: 'MultimodalKB',
+        component: () => import('@/views/multimodal/MultimodalKB.vue'),
+        meta: { title: '多模态知识库', icon: 'PictureOutlined', permission: 'multimodal:view' }
+      },
+      {
+        path: 'multimodal/assets',
+        name: 'MultimodalAssets',
+        component: () => import('@/views/multimodal/AssetLibrary.vue'),
+        meta: { title: '多模态素材库', permission: 'multimodal:view' }
+      },
+      {
+        path: 'multimodal/upload',
+        name: 'MultimodalUpload',
+        component: () => import('@/views/multimodal/AssetUpload.vue'),
+        meta: { title: '素材上传', permission: 'multimodal:manage' }
+      },
+      {
+        path: 'multimodal/assets/:id',
+        name: 'MultimodalAssetDetail',
+        component: () => import('@/views/multimodal/AssetDetail.vue'),
+        meta: { title: '素材详情', permission: 'multimodal:view' }
+      },
+      {
+        path: 'multimodal/tasks',
+        name: 'MultimodalTasks',
+        component: () => import('@/views/multimodal/ProcessingTasks.vue'),
+        meta: { title: '处理任务', permission: 'multimodal:view' }
+      },
+      {
+        path: 'multimodal/search',
+        name: 'MultimodalSearch',
+        component: () => import('@/views/multimodal/MultimodalSearch.vue'),
+        meta: { title: '多模态检索', permission: 'multimodal:view' }
       }
     ]
   }

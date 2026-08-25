@@ -205,8 +205,30 @@ export const workflowApi = {
 // ===== Models =====
 export const modelsApi = {
   selectable: () => client.get('/models/configs/selectable'),
-  listProviders: () => client.get('/models/providers'),
-  listConfigs: () => client.get('/models/configs'),
+  listProviders: (params?: { include_inactive?: boolean }) =>
+    client.get('/models/providers', { params }),
+  listConfigs: (params?: { include_inactive?: boolean }) =>
+    client.get('/models/configs', { params }),
+  createProvider: (data: {
+    name: string; code: string; base_url: string; api_key: string;
+    is_active?: boolean; config?: Record<string, any>;
+  }) => client.post('/models/providers', data),
+  updateProvider: (id: number, data: Partial<{
+    name: string; base_url: string; api_key: string; is_active: boolean; config: Record<string, any>;
+  }>) => client.patch(`/models/providers/${id}`, data),
+  deleteProvider: (id: number) => client.delete(`/models/providers/${id}`),
+  createConfig: (data: {
+    provider_id: number; name: string; model_id: string; model_type: string;
+    max_tokens?: number; temperature?: number; input_cost_per_1k?: number | null;
+    output_cost_per_1k?: number | null; is_active?: boolean;
+  }) => client.post('/models/configs', data),
+  updateConfig: (id: number, data: Partial<{
+    provider_id?: number; name?: string; model_id?: string; model_type?: string;
+    max_tokens?: number; temperature?: number; input_cost_per_1k?: number | null;
+    output_cost_per_1k?: number | null; is_active?: boolean;
+  }>) => client.patch(`/models/configs/${id}`, data),
+  deleteConfig: (id: number) => client.delete(`/models/configs/${id}`),
+  setDefaultConfig: (id: number) => client.post(`/models/configs/${id}/set-default`),
 }
 
 // ===== AI Employees =====
@@ -251,6 +273,101 @@ export const monitoringApi = {
   redis: () => client.get('/monitoring/redis'),
   llm: () => client.get('/monitoring/llm'),
   agents: () => client.get('/monitoring/agents')
+}
+
+// ===== Multimodal Knowledge Base =====
+export const multimodalApi = {
+  // --- 知识库 ---
+  listKbs: (params?: { include_archived?: boolean }) =>
+    client.get('/multimodal/knowledge-bases', { params }),
+  kbDetail: (id: number) => client.get(`/multimodal/knowledge-bases/${id}`),
+  createKb: (data: { name: string; description?: string; code?: string }) =>
+    client.post('/multimodal/knowledge-bases', data),
+  updateKb: (id: number, data: { name?: string; description?: string; status?: string }) =>
+    client.put(`/multimodal/knowledge-bases/${id}`, data),
+  deleteKb: (id: number) => client.delete(`/multimodal/knowledge-bases/${id}`),
+  kbStats: (id: number) => client.get(`/multimodal/knowledge-bases/${id}/stats`),
+
+  // --- 素材 ---
+  listAssets: (params: {
+    knowledge_base_id: number; file_type?: string; status?: string;
+    tag?: string; keyword?: string; include_deleted?: boolean;
+    page?: number; page_size?: number;
+  }) => client.get('/multimodal/assets', { params }),
+  listTrash: (params: { knowledge_base_id: number; page?: number; page_size?: number }) =>
+    client.get('/multimodal/trash', { params }),
+  assetDetail: (id: number) => client.get(`/multimodal/assets/${id}`),
+  updateAsset: (id: number, data: { name?: string; attributes?: Record<string, any> }) =>
+    client.put(`/multimodal/assets/${id}`, data),
+  deleteAsset: (id: number) => client.delete(`/multimodal/assets/${id}`),
+  restoreAsset: (id: number) => client.post(`/multimodal/assets/${id}/restore`),
+  permanentDeleteAsset: (id: number) => client.delete(`/multimodal/assets/${id}/permanent`),
+  downloadUrl: (id: number) => `/api/v1/multimodal/assets/${id}/download`,
+  fileUrl: (path: string) => `/api/v1/multimodal/files/${path}`,
+
+  // --- 上传 ---
+  upload: (kbId: number, files: File[]) => {
+    const fd = new FormData()
+    files.forEach(f => fd.append('files', f))
+    return client.post(`/multimodal/assets/upload?knowledge_base_id=${kbId}`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 600000
+    })
+  },
+
+  // --- AI 处理 ---
+  analyze: (id: number) => client.post(`/multimodal/assets/${id}/analyze`),
+  index: (id: number) => client.post(`/multimodal/assets/${id}/index`),
+  batchAnalyze: (assetIds: number[]) =>
+    client.post('/multimodal/assets/batch-analyze', { asset_ids: assetIds }),
+  units: (id: number) => client.get(`/multimodal/assets/${id}/units`),
+  processing: (id: number, params?: { page?: number; page_size?: number }) =>
+    client.get(`/multimodal/assets/${id}/processing`, { params }),
+
+  // --- 任务监控 ---
+  tasks: (params?: {
+    kb_id?: number; asset_id?: number; task_type?: string;
+    status?: string; page?: number; page_size?: number;
+  }) => client.get('/multimodal/tasks', { params }),
+  queueStatus: () => client.get('/multimodal/queue/status'),
+
+  // --- 审核 ---
+  approve: (id: number, userMetadata?: Record<string, any>) =>
+    client.post(`/multimodal/assets/${id}/approve`, { user_metadata: userMetadata }),
+  updateMetadata: (id: number, metadata: Record<string, any>) =>
+    client.put(`/multimodal/assets/${id}/metadata`, { metadata }),
+  addTags: (id: number, tags: string[], source?: string) =>
+    client.post(`/multimodal/assets/${id}/tags`, { tags, source: source || 'user' }),
+  removeTag: (id: number, tagId: number) =>
+    client.delete(`/multimodal/assets/${id}/tags/${tagId}`),
+  listTags: () => client.get('/multimodal/tags'),
+
+  // --- 检索 ---
+  search: (form: {
+    knowledge_base_id: number; query?: string; asset_types?: string;
+    top_k?: number; min_score?: number; query_image?: File | null;
+  }) => {
+    const fd = new FormData()
+    fd.append('knowledge_base_id', String(form.knowledge_base_id))
+    if (form.query) fd.append('query', form.query)
+    if (form.asset_types) fd.append('asset_types', form.asset_types)
+    fd.append('top_k', String(form.top_k ?? 10))
+    fd.append('min_score', String(form.min_score ?? 0))
+    if (form.query_image) fd.append('query_image', form.query_image)
+    return client.post('/multimodal/search', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000
+    })
+  },
+  similar: (id: number, topK?: number) =>
+    client.get(`/multimodal/assets/${id}/similar`, { params: { top_k: topK } }),
+
+  // --- 关联 ---
+  relations: (id: number) => client.get(`/multimodal/assets/${id}/relations`),
+  createRelation: (id: number, data: { target_asset_id: number; relation_type?: string; metadata?: Record<string, any> }) =>
+    client.post(`/multimodal/assets/${id}/relations`, data),
+  deleteRelation: (relationId: number) =>
+    client.delete(`/multimodal/relations/${relationId}`)
 }
 
 export default client

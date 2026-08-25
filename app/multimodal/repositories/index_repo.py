@@ -71,7 +71,12 @@ async def vector_search(db: AsyncSession, knowledge_base_id: int,
     """
     # 构造 SQL：JSONB metadata 中存 file_type，避免 JOIN 复杂化；
     # 但类型过滤最可靠的方式是 JOIN mm_assets
-    sql = text("""
+    # 注意: asset_types 为 None 时不能把 NULL 作为绑定参数参与比较
+    # （asyncpg AmbiguousParameterError），改为条件拼接 SQL
+    types = asset_types if asset_types else None
+    type_filter = (
+        "AND a.file_type = ANY(CAST(:asset_types AS text[]))" if types else "")
+    sql = text(f"""
         SELECT r.id, r.asset_id, r.knowledge_unit_id, r.embedding_type,
                r.metadata AS meta,
                1 - (r.embedding <=> CAST(:query_vector AS vector)) AS score
@@ -80,18 +85,19 @@ async def vector_search(db: AsyncSession, knowledge_base_id: int,
         WHERE r.knowledge_base_id = :kb_id
           AND a.deleted_at IS NULL
           AND a.status = 'ready'
-          AND (:asset_types IS NULL OR a.file_type = ANY(:asset_types))
+          {type_filter}
         ORDER BY r.embedding <=> CAST(:query_vector AS vector)
         LIMIT :top_k
     """)
 
-    types = asset_types if asset_types else None
-    result = await db.execute(sql, {
+    params: dict = {
         "query_vector": str(query_embedding),
         "kb_id": knowledge_base_id,
-        "asset_types": types,
         "top_k": top_k,
-    })
+    }
+    if types:
+        params["asset_types"] = types
+    result = await db.execute(sql, params)
     rows = result.fetchall()
 
     items = []

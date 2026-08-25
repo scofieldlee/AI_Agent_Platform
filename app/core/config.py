@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     dashscope_api_key: str = ""                           # DASHSCOPE_API_KEY
     qwen_vl_model: str = "qwen-vl-max"                    # 视觉理解模型
     qwen_multimodal_embedding_model: str = "multimodal-embedding-one-peace-v1"
+    qwen_text_embedding_model: str = "text-embedding-v4"  # 降级用文本 Embedding（1024 维，与多模态同维）
     qwen_asr_model: str = "paraformer-v2"                 # 语音识别模型
     multimodal_embedding_dimension: int = 1024            # 通义多模态 Embedding 维度
 

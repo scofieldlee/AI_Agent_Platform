@@ -108,7 +108,10 @@ class QwenVisionAdapter(VisionModelAdapter):
             self._image_content(image_path),
             {"text": prompt},
         ]}]
-        response = await client.acall(model=self._model, messages=messages)
+        # dashscope SDK 仅提供同步 call（无 acall），用线程池避免阻塞事件循环
+        import asyncio
+        response = await asyncio.to_thread(
+            client.call, model=self._model, messages=messages)
         if response.status_code != 200:
             raise RuntimeError(f"DashScope API error {response.status_code}: {response.message}")
         # 输出格式: content = [[{"text": "..."}]]

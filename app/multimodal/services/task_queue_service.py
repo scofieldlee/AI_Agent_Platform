@@ -31,7 +31,13 @@ async def enqueue(task_id: int) -> None:
 
 async def dequeue(timeout: int = 5) -> Optional[int]:
     """任务出队（Worker 用）。返回 task_id 或 None（超时）。"""
-    result = await redis_client.blpop(TASK_QUEUE_KEY, timeout=timeout)
+    try:
+        result = await redis_client.blpop(TASK_QUEUE_KEY, timeout=timeout)
+    except Exception as e:
+        # redis-py asyncio 的 BLPOP 到达 timeout 时可能抛 TimeoutError 而非返回 None
+        if "Timeout" in type(e).__name__ or "Timeout" in str(e):
+            return None
+        raise
     if result is None:
         return None
     _, value = result
