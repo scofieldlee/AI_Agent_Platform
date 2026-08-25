@@ -20,7 +20,8 @@ class IndexRecord(Base):
     """多模态向量索引记录。独立于文档知识库的 chunks.embedding，互不干扰。"""
     __tablename__ = "mm_index_records"
     __table_args__ = (
-        Index("ix_mm_index_kb_vector", "knowledge_base_id",
+        # ivfflat 向量索引必须建在 embedding 列上（kb_id 已由 mapped_column 的 index=True 建立 B-tree 索引）
+        Index("ix_mm_index_embedding", "embedding",
               postgresql_using="ivfflat", postgresql_ops={"embedding": "vector_cosine_ops"}),
     )
 
@@ -35,7 +36,7 @@ class IndexRecord(Base):
     model_name: Mapped[Optional[str]] = mapped_column(String(100))
     embedding: Mapped[Optional[list]] = mapped_column(
         Vector(settings.multimodal_embedding_dimension))
-    metadata: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)  # 检索过滤用
+    meta: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, default=dict)  # 检索过滤用
 
     def __repr__(self) -> str:
         return f"<IndexRecord id={self.id} kb={self.knowledge_base_id} asset={self.asset_id} type={self.embedding_type}>"

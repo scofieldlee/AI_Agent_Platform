@@ -22,7 +22,7 @@ class AssetMetadata(Base):
     asset_id: Mapped[int] = mapped_column(
         ForeignKey("mm_assets.id", ondelete="CASCADE"), nullable=False, index=True)
     metadata_type: Mapped[str] = mapped_column(String(20), nullable=False)  # system / ai / user
-    metadata: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)
+    meta: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, default=dict)
 
     def __repr__(self) -> str:
         return f"<AssetMetadata asset_id={self.asset_id} type={self.metadata_type}>"

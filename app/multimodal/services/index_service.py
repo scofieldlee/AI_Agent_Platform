@@ -4,7 +4,7 @@
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -62,7 +62,7 @@ async def embed_and_index_unit(db: AsyncSession, unit: Any,
         db, knowledge_base_id=unit.knowledge_base_id, asset_id=unit.asset_id,
         knowledge_unit_id=unit.id, embedding=embedding,
         embedding_type=embedding_type, model_name=embedding_adapter.model_name,
-        metadata=metadata)
+        meta=metadata)
 
     await knowledge_unit_repo.update_unit(db, unit, {"status": UnitStatus.INDEXED})
     return True

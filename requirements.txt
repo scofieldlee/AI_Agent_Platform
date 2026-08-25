@@ -44,7 +44,7 @@ Pillow>=10.0.0
 dashscope>=1.20.0             # 通义千问 VL / 多模态 Embedding / ASR
 aiofiles>=24.1.0              # 异步文件操作
 ffmpeg-python>=0.2.0          # 视频处理
-pyscenedetect>=0.6.5          # 视频镜头检测
+scenedetect[opencv]>=0.6.5      # 视频镜头/场景检测
 python-pptx>=1.0.0            # PPT 解析
 
 # --- Utilities ---

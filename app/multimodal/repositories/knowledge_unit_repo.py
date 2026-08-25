@@ -44,7 +44,7 @@ async def count_units_by_asset(db: AsyncSession, asset_id: int) -> int:
 
 async def update_unit(db: AsyncSession, unit: KnowledgeUnit,
                       updates: Dict[str, Any]) -> KnowledgeUnit:
-    for field in ("content", "description", "metadata", "thumbnail_path",
+    for field in ("content", "description", "meta", "thumbnail_path",
                   "start_time", "end_time", "status"):
         if field in updates and updates[field] is not None:
             setattr(unit, field, updates[field])

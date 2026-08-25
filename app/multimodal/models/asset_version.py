@@ -20,7 +20,7 @@ class AssetVersion(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     storage_path: Mapped[Optional[str]] = mapped_column(String(1000))
     file_size: Mapped[int] = mapped_column(BigInteger, default=0)
-    metadata: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)
+    meta: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, default=dict)
     created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     def __repr__(self) -> str:

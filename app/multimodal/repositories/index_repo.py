@@ -29,7 +29,7 @@ async def create_index_record(db: AsyncSession, knowledge_base_id: int, asset_id
         embedding_type=embedding_type,
         model_name=model_name,
         embedding=embedding,
-        metadata=metadata or {})
+        meta=metadata or {})
     db.add(record)
     await db.flush()
     await db.refresh(record)

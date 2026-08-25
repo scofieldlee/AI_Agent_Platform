@@ -23,7 +23,7 @@ class AssetRelation(Base):
     target_asset_id: Mapped[int] = mapped_column(
         ForeignKey("mm_assets.id", ondelete="CASCADE"), nullable=False, index=True)
     relation_type: Mapped[str] = mapped_column(String(30), default="related")
-    metadata: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)
+    meta: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, default=dict)
     created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     def __repr__(self) -> str:

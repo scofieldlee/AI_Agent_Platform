@@ -44,7 +44,7 @@ async def _assemble_results(db: AsyncSession, hits: List[dict],
             "description": (unit.description if unit and unit.description
                             else (asset.attributes or {}).get("description")),
             "content": (unit.content[:300] if unit and unit.content else None),
-            "metadata": (unit.metadata if unit else None) or {},
+            "metadata": (unit.meta if unit else None) or {},
             "start_time": unit.start_time if unit else None,
             "end_time": unit.end_time if unit else None,
             "thumbnail_url": storage_service.file_url(

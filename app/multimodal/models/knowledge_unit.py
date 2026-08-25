@@ -34,7 +34,7 @@ class KnowledgeUnit(Base):
 
     content: Mapped[Optional[str]] = mapped_column(Text)        # 文本化描述（用于 Embedding）
     description: Mapped[Optional[str]] = mapped_column(Text)    # AI 生成描述
-    metadata: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)
+    meta: Mapped[Optional[dict]] = mapped_column("metadata", JSONB, default=dict)
 
     # 视频/音频时间轴
     start_time: Mapped[Optional[float]] = mapped_column(Float)

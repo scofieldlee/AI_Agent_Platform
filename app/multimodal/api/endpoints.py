@@ -330,7 +330,7 @@ async def list_units(asset_id: int, db: AsyncSession = Depends(get_db)):
         items.append({
             "id": u.id, "asset_id": u.asset_id, "knowledge_base_id": u.knowledge_base_id,
             "unit_type": u.unit_type, "unit_index": u.unit_index,
-            "content": u.content, "description": u.description, "metadata": u.metadata,
+            "content": u.content, "description": u.description, "metadata": u.meta,
             "start_time": u.start_time, "end_time": u.end_time,
             "thumbnail_url": storage_service.file_url(u.thumbnail_path),
             "frame_index": u.frame_index, "status": u.status,

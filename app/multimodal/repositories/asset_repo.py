@@ -137,10 +137,10 @@ async def upsert_metadata(db: AsyncSession, asset_id: int,
                                     AssetMetadata.metadata_type == metadata_type))
     record = result.scalars().first()
     if record:
-        record.metadata = metadata
+        record.meta = metadata
     else:
         record = AssetMetadata(asset_id=asset_id, metadata_type=metadata_type,
-                               metadata=metadata)
+                               meta=metadata)
         db.add(record)
     await db.flush()
     await db.refresh(record)
@@ -151,7 +151,7 @@ async def get_all_metadata(db: AsyncSession, asset_id: int) -> Dict[str, dict]:
     """获取素材全部 metadata {system: {...}, ai: {...}, user: {...}}。"""
     result = await db.execute(
         select(AssetMetadata).where(AssetMetadata.asset_id == asset_id))
-    return {r.metadata_type: (r.metadata or {}) for r in result.scalars().all()}
+    return {r.metadata_type: (r.meta or {}) for r in result.scalars().all()}
 
 
 # ---------- 标签 ----------
@@ -226,7 +226,7 @@ async def create_version_snapshot(db: AsyncSession, asset: MultimodalAsset,
         version=asset.version,
         storage_path=asset.storage_path,
         file_size=asset.file_size,
-        metadata={"status": asset.status},
+        meta={"status": asset.status},
         created_by=created_by)
     db.add(version)
     await db.flush()
@@ -247,7 +247,7 @@ async def create_relation(db: AsyncSession, source_asset_id: int, target_asset_i
                           relation_type: str, metadata: Optional[dict] = None,
                           created_by: Optional[int] = None) -> AssetRelation:
     rel = AssetRelation(source_asset_id=source_asset_id, target_asset_id=target_asset_id,
-                        relation_type=relation_type, metadata=metadata or {},
+                        relation_type=relation_type, meta=metadata or {},
                         created_by=created_by)
     db.add(rel)
     await db.flush()

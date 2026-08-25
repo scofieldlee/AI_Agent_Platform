@@ -64,14 +64,14 @@ async def analyze_image_asset(db: AsyncSession, asset_id: int) -> Dict[str, Any]
         unit = units[0]
         await knowledge_unit_repo.update_unit(db, unit, {
             "content": content, "description": result.get("description"),
-            "metadata": result, "thumbnail_path": asset.thumbnail_path,
+            "meta": result, "thumbnail_path": asset.thumbnail_path,
             "status": UnitStatus.PENDING})
         unit_id = unit.id
     else:
         unit = await knowledge_unit_repo.create_unit(
             db, knowledge_base_id=asset.knowledge_base_id, asset_id=asset_id,
             unit_type=UnitType.IMAGE, unit_index=0, content=content,
-            description=result.get("description"), metadata=result,
+            description=result.get("description"), meta=result,
             thumbnail_path=asset.thumbnail_path, status=UnitStatus.PENDING)
         unit_id = unit.id
 
@@ -99,7 +99,7 @@ async def analyze_visual_unit(db: AsyncSession, asset_id: int,
     await knowledge_unit_repo.update_unit(db, unit, {
         "content": content,
         "description": result.get("description"),
-        "metadata": result,
+        "meta": result,
         "status": UnitStatus.PENDING})
     return {"success": True, "analysis": result, "model": vision.model_name}
 
@@ -111,7 +111,7 @@ async def analyze_audio_unit(db: AsyncSession, asset_id: int, unit: Any,
     content = f"transcript: {transcript}" if transcript else ""
     await knowledge_unit_repo.update_unit(db, unit, {
         "content": content, "description": transcript[:200] if transcript else None,
-        "metadata": segment_meta or {}, "status": UnitStatus.PENDING})
+        "meta": segment_meta or {}, "status": UnitStatus.PENDING})
     return {"success": True}
 
 

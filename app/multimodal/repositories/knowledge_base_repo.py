@@ -37,6 +37,8 @@ async def list_kbs(db: AsyncSession, include_archived: bool = False) -> List[Mul
 
 
 async def create_kb(db: AsyncSession, **kwargs) -> MultimodalKnowledgeBase:
+    if not kwargs.get("code"):
+        kwargs["code"] = await generate_kb_code(db, kwargs.get("name", ""))
     kb = MultimodalKnowledgeBase(**kwargs)
     db.add(kb)
     await db.flush()
