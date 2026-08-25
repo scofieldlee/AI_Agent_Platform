@@ -29,6 +29,10 @@ PERMISSION_CATALOG = [
     ("knowledge:view", "View Knowledge Base", "knowledge", "view", "Browse knowledge bases and documents"),
     ("knowledge:manage", "Manage Knowledge Base", "knowledge", "manage", "Add, sync, delete knowledge documents"),
 
+    # Multimodal Knowledge Base
+    ("multimodal:view", "View Multimodal KB", "multimodal", "view", "Browse multimodal knowledge bases, assets and search"),
+    ("multimodal:manage", "Manage Multimodal KB", "multimodal", "manage", "Upload, analyze, review and delete multimodal assets"),
+
     # Tools
     ("tool:view", "View Tools", "tool", "view", "View registered tools"),
     ("tool:manage", "Manage Tools", "tool", "manage", "Register, update, delete tools"),
@@ -63,6 +67,7 @@ ROLE_PERMISSIONS = {
     "ai_admin": [
         "dashboard:view", "agent:view", "agent:manage",
         "knowledge:view", "knowledge:manage",
+        "multimodal:view", "multimodal:manage",
         "tool:view", "tool:manage",
         "model:view", "model:manage",
         "analytics:view",
@@ -81,6 +86,7 @@ ROLE_PERMISSIONS = {
         "dashboard:view",
         "agent:view", "agent:manage",
         "knowledge:view", "knowledge:manage",
+        "multimodal:view", "multimodal:manage",
         "tool:view",
         "model:view",
         "analytics:view",

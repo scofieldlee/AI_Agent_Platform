@@ -11,6 +11,7 @@ from app.database.base import Base
 
 # Import all models so they are registered with Base.metadata
 from app.models import user, agent, workflow, knowledge, conversation, memory, tool, model_config, ai_employee  # noqa
+from app.multimodal import models as multimodal_models  # noqa: F401 (mm_ 前缀表)
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_sync_url)

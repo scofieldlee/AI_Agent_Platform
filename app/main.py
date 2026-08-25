@@ -158,7 +158,7 @@ def create_app() -> FastAPI:
     )
 
     # --- Routes ---
-    from app.api.v1.endpoints import health, agents, conversations, knowledge, tools, analytics, memories, human_tasks, auth, workflow, monitoring, public, models, ai_employees
+    from app.api.v1.endpoints import health, agents, conversations, knowledge, tools, analytics, memories, human_tasks, auth, workflow, monitoring, public, models, ai_employees, multimodal
 
     app.include_router(health.router, prefix="/api/v1", tags=["health"])
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
@@ -174,6 +174,7 @@ def create_app() -> FastAPI:
     app.include_router(models.router, prefix="/api/v1/models", tags=["models"])
     app.include_router(public.router, prefix="/api/v1/public", tags=["public"])
     app.include_router(ai_employees.router, prefix="/api/v1/ai-employees", tags=["ai-employees"])
+    app.include_router(multimodal.router, prefix="/api/v1/multimodal", tags=["multimodal"])
 
     # --- Static files ---
     static_dir = Path(__file__).parent.parent / "static"

@@ -52,6 +52,20 @@ class Settings(BaseSettings):
     # --- CORS ---
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
 
+    # --- Multimodal Knowledge Base ---
+    multimodal_storage_path: str = "uploads/multimodal"   # 本地存储根目录（相对项目根或绝对路径）
+    multimodal_max_image_mb: int = 50                     # 图片大小上限 (MB)
+    multimodal_max_video_mb: int = 500                    # 视频大小上限 (MB)
+    multimodal_max_audio_mb: int = 200                    # 音频大小上限 (MB)
+    multimodal_max_ppt_mb: int = 100                      # PPT 大小上限 (MB)
+
+    # --- DashScope (通义千问) ---
+    dashscope_api_key: str = ""                           # DASHSCOPE_API_KEY
+    qwen_vl_model: str = "qwen-vl-max"                    # 视觉理解模型
+    qwen_multimodal_embedding_model: str = "multimodal-embedding-one-peace-v1"
+    qwen_asr_model: str = "paraformer-v2"                 # 语音识别模型
+    multimodal_embedding_dimension: int = 1024            # 通义多模态 Embedding 维度
+
     # --- Auth / JWT ---
     jwt_secret_key: str = "super-secret-change-in-production-2026"
     jwt_algorithm: str = "HS256"
