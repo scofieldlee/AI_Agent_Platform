@@ -14,6 +14,10 @@
 
 - 🤖 **Agent Runtime** — 基于 LangGraph 的工作流引擎（意图识别 → 知识检索 → 记忆召回 → 工具调用 → LLM 推理 → 人工兜底），支持多 Agent 独立对话
 - 📊 **九大核心中心** — Agent / Workflow / Model / Knowledge / Memory / Tool / Human / Permission / Analytics，全量实现
+- 🖼️ **多模态知识库** — 图片/视频素材上传、ffmpeg 视频抽帧与镜头检测、AI 自动分析与打标、审核后向量索引，支持文本检索、以图搜图、图文融合三种检索模式
+- ✨ **AI 图片生成** — 文生图（T2I）/ 图生图（I2I）：自动命中知识库素材或用户上传图片作为参考图进行创作，生成结果本地持久化
+- 🎬 **AI 视频生成** — 文生视频（T2V）/ 图生视频（I2V 首帧驱动），异步任务链路（提交 → 轮询 → 转存），时长 3~15 秒可指定
+- 💰 **Token Plan 计费治理** — 聊天/视觉/生图/生视频全部走阿里千问 Token Plan 套餐内模型，杜绝套餐外按量计费
 - 🔐 **RBAC 权限体系** — 6 角色 19 权限，JWT 双 Token 认证（access 1h + refresh 7d）
 - 📚 **知识库 + 向量检索** — PostgreSQL + pgvector，支持文档上传、自动分块、语义检索
 - 🧩 **可视化工作流编辑器** — Vue Flow 画布 + 自定义节点 + 执行路径 Trace 高亮
@@ -30,7 +34,8 @@
 | **后端** | Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · Alembic · LangChain · LangGraph |
 | **前端** | Vue 3 · Vite · TypeScript · Ant Design Vue · Vue Flow · Pinia |
 | **数据库** | PostgreSQL 16 + pgvector · Redis 7 |
-| **LLM** | DeepSeek（Chat / Reasoner）· 可扩展多提供商 |
+| **LLM** | DeepSeek（Chat / Reasoner）· 通义千问 Qwen3.x（Chat / Vision，Token Plan 端点）· HappyHorse（视频生成）· 可扩展多提供商 |
+| **多媒体** | ffmpeg（视频抽帧/镜头检测）· PySceneDetect |
 | **部署** | systemd + Nginx + uvicorn（支持演进至 Docker / K8s） |
 
 ---
@@ -73,6 +78,7 @@
 - Node.js 20+
 - PostgreSQL 14+（需安装 pgvector 扩展）
 - Redis 6+
+- ffmpeg（多模态知识库视频素材分析必需）
 
 ### 1. 克隆项目
 
@@ -104,6 +110,11 @@ REDIS_URL=redis://localhost:6379/0
 DEEPSEEK_API_KEY=sk-your-api-key
 JWT_SECRET_KEY=change-this-to-random-hex
 SECRET_KEY=change-this-to-random-hex
+
+# 多模态 / 千问 Token Plan（可选，用于 Agent 视觉、多模态知识库、图片/视频生成）
+DASHSCOPE_API_KEY=sk-sp-your-plan-key            # Token Plan Key（sk-sp- 前缀）
+DASHSCOPE_BASE_URL=https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+DASHSCOPE_EMBEDDING_API_KEY=sk-your-standard-key # 标准 DashScope Key（仅 embedding 索引用）
 ```
 
 ### 3. 数据库初始化
@@ -122,6 +133,9 @@ python scripts/init_db.py
 ```bash
 python run.py
 # 或: uvicorn app.main:app --reload --port 8000
+
+# 多模态知识库处理任务 Worker（图片/视频 AI 分析必需，单独进程）
+python -m app.multimodal.workers.task_worker
 ```
 
 ### 5. 启动前端
@@ -158,6 +172,7 @@ ai-agent-platform/
 │   ├── runtime/                # Agent Runtime（LangGraph 执行引擎）
 │   ├── workflows/              # 工作流定义与执行
 │   ├── knowledge/              # 知识库解析与向量化
+│   ├── multimodal/             # 多模态知识库（素材/处理任务/视觉分析/多模态检索）
 │   ├── memory/                 # 记忆管理
 │   ├── tools/                  # 工具注册与适配器
 │   ├── auth/                   # JWT 认证 + RBAC 权限
@@ -168,7 +183,7 @@ ai-agent-platform/
 │   └── database/               # 数据库会话 + Redis 客户端
 ├── admin/                      # 前端 Admin Portal
 │   ├── src/
-│   │   ├── views/              # 页面（12 个）
+│   │   ├── views/              # 页面（18 个，含多模态知识库 6 页）
 │   │   ├── components/         # 组件
 │   │   ├── api/                # API 客户端
 │   │   ├── stores/             # Pinia 状态管理
@@ -193,10 +208,11 @@ ai-agent-platform/
 | --- | --- |
 | **Agent Center** | Agent CRUD、版本管理、工具/知识/工作流绑定、独立 chat_token |
 | **Workflow Center** | LangGraph 工作流定义、可视化编辑、执行路径追踪 |
-| **Model Center** | 多 LLM 提供商管理、模型配置、动态切换 |
+| **Model Center** | 多 LLM 提供商管理、模型配置、动态切换；视觉自动回退、图片/视频生成回退链 |
 | **Knowledge Center** | 文档上传、自动分块、pgvector 语义检索、置信度过滤 |
+| **Multimodal Center** | 多模态知识库：素材上传、处理任务队列、AI 分析审核、向量索引、三种模式检索 |
 | **Memory Center** | 长期记忆存储与召回，按 user_id 隔离 |
-| **Tool Center** | 工具注册、Schema 化、权限检查（内置 5 个业务工具） |
+| **Tool Center** | 工具注册、Schema 化、权限检查（内置 8 个业务工具） |
 | **Human Center** | 转人工任务、工单分配、处理闭环 |
 | **Permission Center** | RBAC（6 角色 19 权限）、JWT 双 Token |
 | **Analytics Center** | 执行 Trace、Span 级追踪、统计面板 |
@@ -209,6 +225,7 @@ ai-agent-platform/
 | Agents | Agent 管理、配置抽屉（模型/工具/知识/工作流绑定） |
 | Workflow Editor | Vue Flow 可视化工作流编辑 + Trace 高亮 |
 | Knowledge | 知识库管理、文档同步 |
+| 多模态知识库 | 知识库卡片 / 素材库（网格+筛选+回收站）/ 素材详情（AI 分析+标签+时间线）/ 拖拽上传 / 处理任务监控（5s 自动刷新）/ 多模态检索（文本·以图搜图·融合） |
 | Models | 模型提供商与配置管理 |
 | Conversations | 对话历史查看 |
 | Memories | 记忆管理 |
@@ -226,6 +243,71 @@ ai-agent-platform/
 | `inventory_query` | 库存查询 |
 | `refund_query` | 退款查询 |
 | `logistics_query` | 物流查询 |
+| `multimodal_kb_search` | 多模态知识库检索（文本向量 / 以图搜图 / 图文融合，跨知识库合并去重） |
+| `image_generation` | AI 图片生成（文生图 T2I / 图生图 I2I，最多 3 张参考图） |
+| `video_generation` | AI 视频生成（文生视频 T2V / 图生视频 I2V 首帧驱动） |
+
+---
+
+## 🎨 多模态能力
+
+### 1. 多模态知识库
+
+图片、视频素材的完整生命周期管理：
+
+```
+上传素材 → Redis 任务队列 → Worker 异步处理 → AI 自动分析打标 → 人工审核 → 向量索引 → 三种模式检索
+```
+
+- **视频处理链路**：ffmpeg 抽帧 → PySceneDetect 镜头检测（异常自动降级 ffmpeg scene filter）→ 关键帧提取 → Vision 模型逐镜头分析 → 720p 预览生成
+- **AI 分析**：Token Plan 内视觉模型（qwen3.7-plus）生成内容描述 + AI 标签，进入 `review_required` 待审核状态
+- **向量化索引**：文本 → text-embedding-v4；图片 → 通义多模态 embedding（额度耗尽时自动降级 VL 描述 + 文本向量），1024 维存入 pgvector
+- **前端管理台**：6 个页面覆盖知识库卡片、素材库、详情、拖拽上传、任务监控、多模态检索
+
+### 2. Agent × 多模态知识库
+
+Agent 对话自动联动多模态检索：
+
+- **意图驱动**：`knowledge_search` / `product_info` / `product_compare` / `purchase_advice` 意图自动触发多模态 KB 检索
+- **以图搜图**：用户对话中上传图片 → 图像向量检索相似素材，回答中内嵌缩略图
+- **视觉理解回退**：Agent 绑定纯文本模型时收到图片附件，Model Center 自动扫描可用的视觉模型配置接管分析
+- **跨知识库检索**：未指定 KB 时搜索全部活跃知识库并按素材合并去重
+- **产品型号启发式**：从提问中提取产品型号 token（如 F11PRO），优先命中名称匹配的素材，避免相似产品混淆
+
+### 3. AI 图片生成（T2I / I2I）
+
+对话中说"帮我画/生成一张……"即可触发生图编排流程：
+
+1. 先检索多模态知识库 → 命中的图片素材作为参考图
+2. 用户上传的图片附件优先级更高
+3. 有参考图走 **I2I**（保持产品外观/结构/品牌细节一致，仅按提问调整创作方向）；无参考图走纯 **T2I**
+4. 生成结果下载并持久化到本地存储，通过稳定 URL 在回答中展示
+
+> 使用模型：`qwen-image-3.0-pro`（Plan 内），支持限流重试（约 1 次/分钟）
+
+### 4. AI 视频生成（T2V / I2V）
+
+对话中说"帮我生成一段视频"即可触发视频生成编排流程：
+
+1. 用户图片附件 > 知识库素材图，取一张作为**首帧**
+2. 有首帧走 **I2V**（`happyhorse-1.1-i2v`，首帧驱动 + 提示词控制运动）；无首帧走纯 **T2V**（`happyhorse-1.1-t2v`）
+3. 支持指定时长（3~15 秒）、分辨率（480P/720P/1080P）、宽高比（16:9 等）
+4. 异步任务链路：提交 → 15s 轮询 → 结果下载转存（上游 URL 仅 24h 有效）
+5. ⏱️ 单次生成通常需要 1~5 分钟，属正常耗时
+
+### 5. Token Plan 计费策略
+
+所有 AIGC 能力统一收敛到阿里千问 **Token Plan 套餐内**，避免套餐外按量计费：
+
+| 能力 | 模型 | 端点 |
+| --- | --- | --- |
+| Agent 聊天 / 意图识别 | qwen3.7-plus / qwen3.8-max | Plan 兼容端点 |
+| 视觉理解（图文分析、视频镜头分析） | qwen3.7-plus（原生多模态） | Plan 兼容端点 |
+| 图片生成 T2I / I2I | qwen-image-3.0-pro | Plan 多模态生成端点 |
+| 视频生成 T2V / I2V | happyhorse-1.1-t2v / -i2v | Plan 视频合成端点 |
+| Embedding 向量索引 | text-embedding-v4 | 标准 DashScope 端点（双 Key 策略） |
+
+> 注：Token Plan 当前不包含任何 embedding 模型，故索引向量化使用标准端点 Key（费用极低）；其余能力均由 Plan Key（`sk-sp-` 前缀）承载，非 Plan Key 调用生图/生视频时会打印告警日志。
 
 ---
 
@@ -304,11 +386,11 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
                     └──────────┘     └──────────┘
 ```
 
-- **意图识别**：判断用户意图类型与置信度
+- **意图识别**：LLM 意图分类（LLM 不可用时关键词兜底），覆盖商品咨询/订单售后/知识检索/图片生成/视频生成等 10 类意图
 - **知识检索**：pgvector 语义搜索 + 置信度过滤
 - **记忆召回**：按 user_id 检索相关长期记忆
-- **工具调用**：Schema 化工具执行（带权限检查）
-- **LLM 推理**：组合上下文生成回答
+- **工具调用**：Schema 化工具执行（带权限检查）；生图/生视频意图走专用编排流程（知识库素材作为参考图/首帧）
+- **LLM 推理**：组合上下文生成回答；图片附件自动切换多模态模型
 - **人工兜底**：置信度不足时创建工单转人工
 
 ---
