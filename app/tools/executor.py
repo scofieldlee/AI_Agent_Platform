@@ -80,7 +80,12 @@ class ToolExecutor:
         result_data = None
 
         try:
-            result = await tool.execute(**parameters)
+            result = await tool.execute(
+                agent_id=agent_id,
+                conversation_id=conversation_id,
+                trace_id=trace_id,
+                **parameters,
+            )
             result_data = result.data
             if not result.success:
                 status = "error"
@@ -103,8 +108,8 @@ class ToolExecutor:
                 tool_name=tool_name,
                 agent_id=agent_id,
                 conversation_id=conversation_id,
-                input_data=parameters,
-                output_data=result_data,
+                input_data=self._sanitize_for_log(parameters),
+                output_data=self._sanitize_for_log(result_data),
                 status=status,
                 error=error_msg,
                 duration_ms=duration_ms,
@@ -162,6 +167,21 @@ class ToolExecutor:
                     )
 
         return None
+
+    @staticmethod
+    def _sanitize_for_log(value, max_len: int = 300):
+        """Recursively truncate oversized strings (e.g. base64 images) so
+        tool execution logs stay small in the database."""
+        if isinstance(value, dict):
+            return {
+                k: ToolExecutor._sanitize_for_log(v, max_len)
+                for k, v in value.items()
+            }
+        if isinstance(value, list):
+            return [ToolExecutor._sanitize_for_log(v, max_len) for v in value]
+        if isinstance(value, str) and len(value) > max_len:
+            return value[:200] + f"...(truncated, {len(value)} chars)"
+        return value
 
     async def _record_execution(
         self,

@@ -9,6 +9,7 @@ MVP Workflow:
 """
 
 import logging
+import re
 from typing import Dict, Any, Optional
 
 from app.runtime.state import AgentState
@@ -35,6 +36,7 @@ DEFAULT_SYSTEM_PROMPT = """你是 Ruko（路客）品牌的专业商品客服助
 - 如果提供了库存查询结果，告诉顾客是否有货、价格和预计到货时间
 - 如果提供了退款查询结果，告诉顾客退款单号、处理状态、退款金额和退款类型
 - 如果提供了物流轨迹查询结果，告诉顾客当前物流状态、当前位置、预计送达时间，并简要列出最近的物流轨迹
+- 如果工具结果中包含了 AI 生成的图片（以 markdown 图片格式 ![描述](URL) 提供），请在回答中直接展示该图片，不要只提供链接
 - 如果知识上下文中没有相关信息，诚实告知并建议转人工
 - 语气友好、专业、简洁，用自然语言回答
 - 如果顾客在投诉或情绪激动，直接建议转人工客服
@@ -193,6 +195,328 @@ async def memory_node(state: AgentState) -> Dict[str, Any]:
 
 # --- Tool Execution Node ---
 
+async def _asset_image_to_data_url(asset_id) -> Optional[str]:
+    """Read a KB image asset (original preferred) as a base64 data URL.
+
+    Returns None when the asset is missing, not an image, or unreadable.
+    """
+    import base64 as b64_mod
+
+    try:
+        from app.database.session import async_session_factory
+        from app.multimodal.repositories import asset_repo
+        from app.multimodal.services import storage_service
+
+        async with async_session_factory() as db:
+            asset = await asset_repo.get_asset(db, asset_id)
+            if not asset or asset.file_type != "image":
+                return None
+            # Prefer the original (higher fidelity) over the thumbnail
+            path = asset.storage_path or asset.thumbnail_path
+            mime = asset.mime_type or "image/png"
+        if not path:
+            return None
+        data = await storage_service.read_file(path)
+        if not data:
+            return None
+        return f"data:{mime};base64,{b64_mod.b64encode(data).decode()}"
+    except Exception as e:
+        logger.warning(f"Failed to load image asset {asset_id} as reference: {e}")
+        return None
+
+
+def _extract_product_tokens(user_input: str) -> list:
+    """Extract product-code-like tokens (e.g. F11PRO, U11mini, F7MINI)."""
+    return [t.upper() for t in re.findall(r"[A-Za-z]+\d+[A-Za-z0-9]*", user_input)]
+
+
+def _select_reference_assets(assets: list, user_input: str, limit: int = 2) -> list:
+    """Pick which retrieved image assets become generation references.
+
+    Heuristic: if the user's input contains product codes (e.g. "F11PRO"),
+    prefer assets whose name contains those codes — pure vector-score ranking
+    can rank a visually similar but different product (U11PRO) above the
+    requested one. Falls back to score order when no code matches.
+    """
+    tokens = _extract_product_tokens(user_input)
+    if tokens:
+        matched = [
+            a for a in assets
+            if any(t in (a.get("asset_name") or "").upper() for t in tokens)
+        ]
+        if matched:
+            return matched[:limit]
+    return assets[:limit]
+
+
+def _strip_generation_verbs(user_input: str) -> str:
+    """Strip request verbs so the image prompt describes the scene only."""
+    prompt = user_input
+    for verb in [
+        "帮我生成", "请生成", "给我生成", "生成一张", "生成一个",
+        "生成", "画一张", "画一个", "画", "给我画", "制作一张",
+        "制作", "创作一张", "创作",
+    ]:
+        if prompt.startswith(verb):
+            prompt = prompt[len(verb):].strip()
+            break
+    prompt = re.sub(r"[的]?图片[吗？?]?$", "", prompt).strip()
+    return prompt or user_input
+
+
+async def _run_image_generation_flow(state, user_input, executor, registry) -> list:
+    """Dedicated orchestration for the image_generation intent.
+
+    Principle:
+      1. Search the multimodal KB first. Retrieved image assets become
+         reference images for the generation model.
+      2. User-uploaded image attachments are also references (higher
+         priority than KB assets — they express explicit intent).
+      3. Call image_generation with up to 3 reference images (I2I) when
+         available; otherwise fall back to pure text-to-image (T2I).
+    """
+    trace_kwargs = {
+        "agent_id": state.get("agent_id"),
+        "conversation_id": state.get("conversation_id"),
+        "trace_id": state.get("trace_id"),
+    }
+
+    tool_results = []
+    kb_reference_images = []
+
+    # 1. KB retrieval for reference assets
+    if registry.has("multimodal_kb_search"):
+        kb_result = await executor.execute(
+            tool_name="multimodal_kb_search",
+            parameters={
+                "query": user_input,
+                "max_results": 5,
+                # Only image assets can serve as generation references
+                "asset_types": ["image"],
+            },
+            **trace_kwargs,
+        )
+        if kb_result.success and kb_result.data:
+            assets = kb_result.data.get("assets", [])
+            image_assets = [a for a in assets if a.get("asset_type") == "image"]
+            # Prefer assets whose name matches product codes in the request
+            selected_refs = _select_reference_assets(image_assets, user_input, limit=2)
+            for a in selected_refs:
+                data_url = await _asset_image_to_data_url(a.get("asset_id"))
+                if data_url:
+                    kb_reference_images.append(data_url)
+            if kb_result.data.get("total", 0) > 0:
+                tool_results.append({
+                    "tool": "multimodal_kb_search",
+                    "assets": assets,
+                    "total": kb_result.data.get("total", 0),
+                    "query_type": kb_result.data.get("query_type", "text"),
+                    "knowledge_base_ids": kb_result.data.get("knowledge_base_ids"),
+                    "duration_ms": kb_result.duration_ms,
+                })
+            logger.info(
+                f"Image generation KB retrieval | assets={kb_result.data.get('total', 0)} "
+                f"image_references={len(kb_reference_images)}"
+            )
+        elif not kb_result.success:
+            logger.warning(f"multimodal_kb_search failed in image flow: {kb_result.error}")
+
+    # 2. User-uploaded image attachments (priority over KB references)
+    user_images = []
+    for att in state.get("attachments", []) or []:
+        if att.get("type") == "image" and att.get("content"):
+            mime = att.get("meta", {}).get("mime_type", "image/jpeg")
+            user_images.append(f"data:{mime};base64,{att['content']}")
+
+    # Reference order: user uploads first, KB assets supplement; max 3.
+    reference_images = (user_images + kb_reference_images)[:3]
+
+    # 3. Build prompt
+    prompt = _strip_generation_verbs(user_input)
+    if reference_images:
+        prompt = (
+            "请严格参考提供的参考图片进行创作：保持参考图中产品/主体的外观、"
+            "结构、比例与品牌细节一致，仅按以下要求进行创作调整："
+            f"{prompt}"
+        )
+
+    # 4. Generate
+    if not registry.has("image_generation"):
+        logger.warning("image_generation tool not registered; skipping")
+        return tool_results
+
+    gen_result = await executor.execute(
+        tool_name="image_generation",
+        parameters={
+            "prompt": prompt,
+            "size": "1024x1024",
+            "n": 1,
+            "reference_images": reference_images,
+        },
+        **trace_kwargs,
+    )
+    if gen_result.success:
+        data = gen_result.data or {}
+        tool_results.append({
+            "tool": "image_generation",
+            "duration_ms": gen_result.duration_ms,
+            "images": data.get("images", []),
+            "prompt": data.get("prompt", ""),
+            "model": data.get("model", "unknown"),
+            "references_used": data.get("references_used", 0),
+        })
+    else:
+        logger.warning(f"Tool image_generation failed: {gen_result.error}")
+
+    return tool_results
+
+
+def _strip_video_generation_verbs(user_input: str) -> str:
+    """Strip request verbs so the video prompt describes the scene only."""
+    prompt = user_input
+    for verb in [
+        "帮我生成一段视频", "帮我生成视频", "请生成一段视频", "请生成视频",
+        "给我生成一段视频", "给我生成视频", "生成一段视频", "生成一个视频",
+        "生成视频", "帮我制作一段视频", "帮我制作视频", "请制作一段视频",
+        "制作一段视频", "制作一个视频", "制作视频", "做个视频", "做一段视频",
+        "创作一段视频", "创作视频", "生成", "制作", "创作",
+    ]:
+        if prompt.startswith(verb):
+            prompt = prompt[len(verb):].strip()
+            break
+    prompt = re.sub(r"[的]?视频[吗？?]?$", "", prompt).strip()
+    prompt = re.sub(r"[的]?短片[吗？?]?$", "", prompt).strip()
+    return prompt or user_input
+
+
+def _extract_video_duration(user_input: str) -> int:
+    """Extract a requested duration (3-15s) from the user's input."""
+    m = re.search(r"(\d{1,2})\s*(?:秒|s|S)", user_input)
+    if m:
+        try:
+            return max(3, min(15, int(m.group(1))))
+        except ValueError:
+            pass
+    return 5
+
+
+async def _run_video_generation_flow(state, user_input, executor, registry) -> list:
+    """Dedicated orchestration for the video_generation intent.
+
+    Principle (mirrors the image generation flow):
+      1. User-uploaded image attachments are the strongest first-frame
+         candidate for image-to-video (I2V).
+      2. Otherwise search the multimodal KB; a retrieved image asset whose
+         name matches product codes in the request becomes the first frame.
+      3. With a first frame → I2V (happyhorse-1.1-i2v); without → pure
+         text-to-video (happyhorse-1.1-t2v). Either way the text prompt
+         comes from the user's request.
+    """
+    trace_kwargs = {
+        "agent_id": state.get("agent_id"),
+        "conversation_id": state.get("conversation_id"),
+        "trace_id": state.get("trace_id"),
+    }
+
+    tool_results = []
+    first_frame_image = None
+    first_frame_source = None
+
+    # 1. User-uploaded image attachments (highest priority first frame)
+    for att in state.get("attachments", []) or []:
+        if att.get("type") == "image" and att.get("content"):
+            mime = att.get("meta", {}).get("mime_type", "image/jpeg")
+            first_frame_image = f"data:{mime};base64,{att['content']}"
+            first_frame_source = "user_upload"
+            break
+
+    # 2. KB retrieval for a first-frame reference asset
+    if first_frame_image is None and registry.has("multimodal_kb_search"):
+        kb_result = await executor.execute(
+            tool_name="multimodal_kb_search",
+            parameters={
+                "query": user_input,
+                "max_results": 5,
+                "asset_types": ["image"],
+            },
+            **trace_kwargs,
+        )
+        if kb_result.success and kb_result.data:
+            assets = kb_result.data.get("assets", [])
+            image_assets = [a for a in assets if a.get("asset_type") == "image"]
+            selected = _select_reference_assets(image_assets, user_input, limit=1)
+            if selected:
+                data_url = await _asset_image_to_data_url(
+                    selected[0].get("asset_id")
+                )
+                if data_url:
+                    first_frame_image = data_url
+                    first_frame_source = f"kb_asset:{selected[0].get('asset_name')}"
+            if kb_result.data.get("total", 0) > 0:
+                tool_results.append({
+                    "tool": "multimodal_kb_search",
+                    "assets": assets,
+                    "total": kb_result.data.get("total", 0),
+                    "query_type": kb_result.data.get("query_type", "text"),
+                    "knowledge_base_ids": kb_result.data.get("knowledge_base_ids"),
+                    "duration_ms": kb_result.duration_ms,
+                })
+            logger.info(
+                f"Video generation KB retrieval | assets={kb_result.data.get('total', 0)} "
+                f"first_frame={'found' if first_frame_image else 'none'}"
+            )
+        elif not kb_result.success:
+            logger.warning(f"multimodal_kb_search failed in video flow: {kb_result.error}")
+
+    # 3. Build prompt
+    prompt = _strip_video_generation_verbs(user_input)
+    if first_frame_image:
+        prompt = (
+            "以提供的首帧图片为基础生成视频：保持画面中产品/主体的外观、结构、"
+            "比例与品牌细节一致，镜头运动和内容按以下要求呈现："
+            f"{prompt}"
+        )
+
+    duration = _extract_video_duration(user_input)
+
+    # 4. Generate (long-running: task usually takes 1-5 minutes)
+    if not registry.has("video_generation"):
+        logger.warning("video_generation tool not registered; skipping")
+        return tool_results
+
+    gen_result = await executor.execute(
+        tool_name="video_generation",
+        parameters={
+            "prompt": prompt,
+            "resolution": "720P",
+            "ratio": "16:9",
+            "duration": duration,
+            "first_frame_image": first_frame_image or "",
+        },
+        **trace_kwargs,
+    )
+    if gen_result.success:
+        data = gen_result.data or {}
+        tool_results.append({
+            "tool": "video_generation",
+            "duration_ms": gen_result.duration_ms,
+            "videos": data.get("videos", []),
+            "prompt": data.get("prompt", ""),
+            "model": data.get("model", "unknown"),
+            "duration": data.get("duration", duration),
+            "first_frame_used": data.get("first_frame_used", False),
+            "first_frame_source": first_frame_source,
+        })
+    else:
+        logger.warning(f"Tool video_generation failed: {gen_result.error}")
+        tool_results.append({
+            "tool": "video_generation",
+            "error": gen_result.error,
+        })
+
+    return tool_results
+
+
 async def tool_node(state: AgentState) -> Dict[str, Any]:
     """Execute tools based on intent — multi-tool dispatcher.
 
@@ -217,6 +541,8 @@ async def tool_node(state: AgentState) -> Dict[str, Any]:
         "purchase_advice": ["product_query", "inventory_query", "multimodal_kb_search"],
         "after_sale": ["refund_query", "logistics_query", "order_query"],
         "knowledge_search": ["multimodal_kb_search"],
+        "image_generation": ["image_generation"],
+        "video_generation": ["video_generation"],
     }
 
     tools_to_run = TOOL_MAP.get(intent, [])
@@ -231,6 +557,31 @@ async def tool_node(state: AgentState) -> Dict[str, Any]:
 
         registry = get_registry()
         executor = ToolExecutor()
+
+        # Image generation intent: dedicated flow — KB asset retrieval
+        # (reference images) + user attachments + text prompt → I2I/T2I.
+        if intent == "image_generation" and registry.has("image_generation"):
+            tool_results = await _run_image_generation_flow(
+                state, user_input, executor, registry,
+            )
+            logger.info(
+                f"Tool node done: {len(tool_results)} results for "
+                f"image_generation flow"
+            )
+            return {"tool_results": tool_results}
+
+        # Video generation intent: dedicated flow — KB asset retrieval /
+        # user image attachment as first frame + text prompt → I2V/T2V.
+        # Long-running (upstream async task, usually 1-5 minutes).
+        if intent == "video_generation" and registry.has("video_generation"):
+            tool_results = await _run_video_generation_flow(
+                state, user_input, executor, registry,
+            )
+            logger.info(
+                f"Tool node done: {len(tool_results)} results for "
+                f"video_generation flow"
+            )
+            return {"tool_results": tool_results}
 
         # Build tool execution tasks
         async def run_tool(tool_name: str):
@@ -262,6 +613,22 @@ async def tool_node(state: AgentState) -> Dict[str, Any]:
                             f"for image/fused retrieval (ext={ext})"
                         )
                         break
+            elif tool_name == "image_generation":
+                # Strip request verbs so the prompt describes the scene only
+                prompt = user_input
+                for verb in [
+                    "帮我生成", "请生成", "给我生成", "生成一张", "生成一个",
+                    "生成", "画一张", "画一个", "画", "给我画", "制作一张",
+                    "制作", "创作一张", "创作",
+                ]:
+                    if prompt.startswith(verb):
+                        prompt = prompt[len(verb):].strip()
+                        break
+                prompt = re.sub(r"[的]?图片[吗？?]?$", "", prompt).strip()
+                # Ensure product context is preserved if user only gave a short phrase
+                if not prompt:
+                    prompt = user_input
+                params = {"prompt": prompt, "size": "1024x1024", "n": 1}
             else:
                 params = {"query": user_input, "max_results": 5}
 
@@ -305,8 +672,12 @@ async def tool_node(state: AgentState) -> Dict[str, Any]:
             elif tool_name == "multimodal_kb_search":
                 formatted["assets"] = data.get("assets", [])
                 formatted["total"] = data.get("total", 0)
-                formatted["knowledge_base_id"] = data.get("knowledge_base_id")
+                formatted["knowledge_base_ids"] = data.get("knowledge_base_ids")
                 formatted["query_type"] = data.get("query_type", "text")
+            elif tool_name == "image_generation":
+                formatted["images"] = data.get("images", [])
+                formatted["prompt"] = data.get("prompt", "")
+                formatted["model"] = data.get("model", "unknown")
 
             logger.info(
                 f"Tool executed: {tool_name} | "
@@ -457,8 +828,57 @@ async def llm_node(state: AgentState) -> Dict[str, Any]:
                             f"{tag_str}，相关度 {a.get('score')}\n"
                             f"内容：{str(desc_str)[:300]}"
                         )
+                        # Inline display of image assets (also used as
+                        # generation references in image_generation flow)
+                        thumb = a.get("thumbnail_url")
+                        if thumb and a.get("asset_type") == "image":
+                            tool_parts.append(f"![素材 {a.get('asset_name')}]({thumb})")
                 else:
                     tool_parts.append("多模态知识库中未检索到相关素材。")
+
+            # Format image generation results
+            elif tool_name == "image_generation":
+                images = tr.get("images", [])
+                if images:
+                    refs = tr.get("references_used", 0)
+                    if refs:
+                        tool_parts.append(
+                            f"AI 图片生成结果（基于 {refs} 张参考图进行图生图创作，已在下方展示）："
+                        )
+                    else:
+                        tool_parts.append("AI 图片生成结果（纯文生图创作，已在下方展示）：")
+                    for idx, img in enumerate(images, 1):
+                        url = img.get("url")
+                        if url:
+                            tool_parts.append(f"![生成图片 {idx}]({url})")
+                else:
+                    tool_parts.append("图片生成未能成功，请向用户说明可稍后重试或转人工。")
+
+            # Format video generation results
+            elif tool_name == "video_generation":
+                videos = tr.get("videos", [])
+                if videos:
+                    if tr.get("first_frame_used"):
+                        tool_parts.append(
+                            "AI 视频生成结果（以参考图作为首帧进行图生视频创作，"
+                            f"时长 {tr.get('duration', 5)} 秒，已在下方提供链接）："
+                        )
+                    else:
+                        tool_parts.append(
+                            f"AI 视频生成结果（纯文生视频创作，"
+                            f"时长 {tr.get('duration', 5)} 秒，已在下方提供链接）："
+                        )
+                    for idx, vid in enumerate(videos, 1):
+                        url = vid.get("url")
+                        if url:
+                            tool_parts.append(f"[生成视频 {idx}]({url})")
+                elif tr.get("error"):
+                    tool_parts.append(
+                        f"视频生成失败（原因：{str(tr.get('error'))[:200]}），"
+                        "请向用户说明可稍后重试。"
+                    )
+                else:
+                    tool_parts.append("视频生成未能成功，请向用户说明可稍后重试或转人工。")
 
             # Format logistics tracking results
             elif tool_name == "logistics_query" and tr.get("trackings"):

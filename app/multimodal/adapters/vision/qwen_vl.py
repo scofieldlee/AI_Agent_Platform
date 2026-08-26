@@ -1,6 +1,8 @@
-"""通义千问 VL 视觉模型适配器 (DashScope qwen-vl-max).
+"""通义千问 VL 视觉模型适配器 (Token Plan OpenAI 兼容端点).
 
-依赖: DASHSCOPE_API_KEY（app/core/config.py settings.dashscope_api_key）。
+依赖: DASHSCOPE_API_KEY（Plan Key，sk-sp-）+ DASHSCOPE_BASE_URL（Token Plan 兼容端点）。
+模型: qwen3.7-plus 等 Plan 内模型原生支持图片输入（qwen-vl-max / qwen-vl-plus
+在 Plan 端点不存在，不可使用——会回退按量计费或直接 404）。
 未配置 Key 时 analyze 抛出明确异常，调用方（Processor）将任务标记为 failed。
 """
 
@@ -9,6 +11,8 @@ import json
 import logging
 import re
 from typing import Optional
+
+from openai import AsyncOpenAI
 
 from app.core.config import settings
 from app.multimodal.adapters.vision.base import VisionModelAdapter
@@ -69,59 +73,62 @@ def _extract_json(text: str) -> dict:
 
 
 class QwenVisionAdapter(VisionModelAdapter):
-    """通义千问 VL 适配器（DashScope MultiModalConversation API）."""
+    """通义千问视觉适配器（Token Plan OpenAI 兼容端点，全部消耗 Plan 配额）."""
 
     def __init__(self, model: Optional[str] = None):
         self._model = model or settings.qwen_vl_model
-        self._client = None
+        self._client: Optional[AsyncOpenAI] = None
 
     @property
     def model_name(self) -> str:
         return self._model
 
-    def _ensure_client(self):
-        """懒加载 dashscope 并校验 API Key。"""
-        if not settings.dashscope_api_key:
+    def _ensure_client(self) -> AsyncOpenAI:
+        """懒加载 Plan 端点 OpenAI 兼容客户端并校验 Plan Key."""
+        api_key = settings.dashscope_api_key
+        if not api_key:
             raise RuntimeError(
-                "DASHSCOPE_API_KEY 未配置：请在 .env 中设置后重启服务，"
+                "DASHSCOPE_API_KEY (Token Plan Key) 未配置：请在 .env 中设置后重启服务，"
                 "并触发素材重新分析。")
+        if not api_key.startswith("sk-sp-"):
+            logger.warning(
+                "DASHSCOPE_API_KEY 不以 sk-sp- 开头，可能不是 Token Plan Key，"
+                "视觉分析将产生按量计费费用！")
         if self._client is None:
-            import dashscope
-            dashscope.api_key = settings.dashscope_api_key
-            self._client = dashscope.MultiModalConversation
+            base_url = (
+                settings.dashscope_base_url
+                or "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+            )
+            self._client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                max_retries=3,
+                timeout=180,
+            )
         return self._client
 
     @staticmethod
     def _image_content(image_path: str) -> dict:
-        """读取本地图片 → base64 data URL 消息段."""
+        """读取本地图片 → OpenAI 兼容 image_url 消息段（base64 data URL）."""
         with open(image_path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode("utf-8")
         ext = image_path.rsplit(".", 1)[-1].lower()
         if ext in ("jpg", "jpeg"):
             ext = "jpeg"
-        return {"image": f"data:image/{ext};base64,{b64}"}
+        return {"type": "image_url", "image_url": {"url": f"data:image/{ext};base64,{b64}"}}
 
     async def _call(self, image_path: str, prompt: str) -> str:
-        """调用多模态对话，返回文本输出。"""
+        """调用 Plan 端点多模态对话，返回文本输出。"""
         client = self._ensure_client()
         messages = [{"role": "user", "content": [
             self._image_content(image_path),
-            {"text": prompt},
+            {"type": "text", "text": prompt},
         ]}]
-        # dashscope SDK 仅提供同步 call（无 acall），用线程池避免阻塞事件循环
-        import asyncio
-        response = await asyncio.to_thread(
-            client.call, model=self._model, messages=messages)
-        if response.status_code != 200:
-            raise RuntimeError(f"DashScope API error {response.status_code}: {response.message}")
-        # 输出格式: content = [[{"text": "..."}]]
-        content = response.output.choices[0].message.content
-        if isinstance(content, list):
-            text = "".join(
-                seg.get("text", "") for seg in content if isinstance(seg, dict))
-        else:
-            text = str(content)
-        return text
+        response = await client.chat.completions.create(
+            model=self._model,
+            messages=messages,
+        )
+        return response.choices[0].message.content or ""
 
     async def analyze_image(self, image_path: str, prompt: Optional[str] = None) -> dict:
         text = await self._call(image_path, prompt or IMAGE_ANALYSIS_PROMPT)

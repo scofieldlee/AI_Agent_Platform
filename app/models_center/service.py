@@ -313,6 +313,189 @@ class ModelService:
             logger.warning(f"Vision fallback adapter lookup failed: {e}")
         return None
 
+    async def _get_image_generation_fallback_adapter(self) -> Optional[BaseModelAdapter]:
+        """Find an adapter that supports image generation among active configs.
+
+        Used when the agent's primary chat model (e.g. DeepSeek) does not
+        support image generation, but a Qwen/DashScope config is available.
+        """
+        from app.repositories.model_repo import list_model_configs
+        from app.database.session import async_session_factory
+
+        try:
+            async with async_session_factory() as db:
+                configs = await list_model_configs(db, include_inactive=False)
+                for config in configs:
+                    provider = config.provider
+                    if not provider or not provider.is_active or not provider.api_key:
+                        continue
+                    adapter_cls = ADAPTER_REGISTRY.get(provider.code)
+                    if not adapter_cls:
+                        continue
+                    adapter = adapter_cls(
+                        api_key=provider.api_key,
+                        base_url=provider.base_url,
+                        model_id=config.model_id,
+                    )
+                    if getattr(adapter, "supports_image_generation", False) and hasattr(
+                        adapter, "generate_image"
+                    ):
+                        logger.info(
+                            f"Image generation fallback adapter resolved | config_id={config.id} "
+                            f"provider={provider.code} model={config.model_id}"
+                        )
+                        return adapter
+        except Exception as e:
+            logger.warning(f"Image generation fallback adapter lookup failed: {e}")
+        return None
+
+    async def generate_image(
+        self,
+        prompt: str,
+        size: str = "1024x1024",
+        n: int = 1,
+        model_config_id: Optional[int] = None,
+        model: Optional[str] = None,
+        reference_images: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Generate images via the configured chat provider.
+
+        Routes to the adapter's generate_image method if available. If the
+        primary chat adapter does not support image generation (e.g. DeepSeek),
+        falls back to any active Qwen/DashScope config.
+
+        ``reference_images`` (optional, up to 3 base64 data URLs) enables
+        image-to-image editing on supporting models (qwen-image-3.0-pro):
+        knowledge-base assets and/or user-uploaded images are used as visual
+        references alongside the text prompt.
+        """
+        adapter = await self._get_chat_adapter(model_config_id)
+
+        if not hasattr(adapter, "generate_image"):
+            fallback = await self._get_image_generation_fallback_adapter()
+            if fallback is not None:
+                logger.info(
+                    "Chat adapter does not support image generation; "
+                    "using image generation fallback adapter."
+                )
+                adapter = fallback
+            else:
+                raise RuntimeError(
+                    f"Adapter {type(adapter).__name__} does not support image generation. "
+                    "Configure a Qwen/DashScope model."
+                )
+
+        try:
+            result = await adapter.generate_image(
+                prompt=prompt,
+                size=size,
+                n=n,
+                model=model,
+                reference_images=reference_images,
+            )
+            logger.info(
+                f"Image generation | model={result.get('model')} "
+                f"prompt={prompt[:60]} images={len(result.get('images', []))} "
+                f"references={len(reference_images or [])}"
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Image generation failed: {e}", exc_info=True)
+            raise
+
+    async def _get_video_generation_fallback_adapter(self) -> Optional[BaseModelAdapter]:
+        """Find an adapter that supports video generation among active configs.
+
+        Used when the agent's primary chat model does not support video
+        generation, but a Qwen/DashScope config is available (Plan Key).
+        """
+        from app.repositories.model_repo import list_model_configs
+        from app.database.session import async_session_factory
+
+        try:
+            async with async_session_factory() as db:
+                configs = await list_model_configs(db, include_inactive=False)
+                for config in configs:
+                    provider = config.provider
+                    if not provider or not provider.is_active or not provider.api_key:
+                        continue
+                    adapter_cls = ADAPTER_REGISTRY.get(provider.code)
+                    if not adapter_cls:
+                        continue
+                    adapter = adapter_cls(
+                        api_key=provider.api_key,
+                        base_url=provider.base_url,
+                        model_id=config.model_id,
+                    )
+                    if getattr(adapter, "supports_video_generation", False) and hasattr(
+                        adapter, "generate_video"
+                    ):
+                        logger.info(
+                            f"Video generation fallback adapter resolved | config_id={config.id} "
+                            f"provider={provider.code} model={config.model_id}"
+                        )
+                        return adapter
+        except Exception as e:
+            logger.warning(f"Video generation fallback adapter lookup failed: {e}")
+        return None
+
+    async def generate_video(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        resolution: str = "720P",
+        ratio: str = "16:9",
+        duration: int = 5,
+        first_frame_image: Optional[str] = None,
+        model_config_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Generate a video via the Token Plan video-synthesis API.
+
+        Routes to the adapter's generate_video method if available. If the
+        primary chat adapter does not support video generation (e.g. DeepSeek),
+        falls back to any active Qwen/DashScope config.
+
+        ``first_frame_image`` (optional, base64 data URL or public URL)
+        enables image-to-video: the image drives the first frame while the
+        text prompt steers motion and content (happyhorse-1.1-i2v).
+        """
+        adapter = await self._get_chat_adapter(model_config_id)
+
+        if not (hasattr(adapter, "generate_video") and getattr(
+            adapter, "supports_video_generation", False
+        )):
+            fallback = await self._get_video_generation_fallback_adapter()
+            if fallback is not None:
+                logger.info(
+                    "Chat adapter does not support video generation; "
+                    "using video generation fallback adapter."
+                )
+                adapter = fallback
+            else:
+                raise RuntimeError(
+                    f"Adapter {type(adapter).__name__} does not support video generation. "
+                    "Configure a Qwen/DashScope model (Token Plan)."
+                )
+
+        try:
+            result = await adapter.generate_video(
+                prompt=prompt,
+                model=model,
+                resolution=resolution,
+                ratio=ratio,
+                duration=duration,
+                first_frame_image=first_frame_image,
+            )
+            logger.info(
+                f"Video generation | model={result.get('model')} "
+                f"prompt={prompt[:60]} duration={result.get('duration')}s "
+                f"first_frame={result.get('first_frame_used')}"
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Video generation failed: {e}", exc_info=True)
+            raise
+
     async def chat_with_images(
         self,
         system_prompt: str,

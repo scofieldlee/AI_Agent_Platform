@@ -49,12 +49,14 @@ class QwenMultimodalEmbeddingAdapter(MultimodalEmbeddingAdapter):
         return self._fallback_model if self._fallback_mode else self._model
 
     def _ensure_clients(self):
-        if not settings.dashscope_api_key:
+        emb_key = settings.dashscope_embedding_api_key or settings.dashscope_api_key
+        if not emb_key:
             raise RuntimeError(
                 "DASHSCOPE_API_KEY 未配置：请在 .env 中设置后重启服务，"
                 "并触发素材重新索引。")
         import dashscope
-        dashscope.api_key = settings.dashscope_api_key
+        dashscope.api_key = emb_key
+        # embedding 模型仅在标准端点可用（Plan 端点不支持 embedding）
         if self._mm_client is None:
             self._mm_client = dashscope.MultiModalEmbedding
         if self._text_client is None:

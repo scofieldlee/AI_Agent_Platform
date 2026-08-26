@@ -28,6 +28,8 @@ async def register_default_tools():
     from app.tools.adapters.refund_query import RefundQueryTool
     from app.tools.adapters.logistics_query import LogisticsQueryTool
     from app.tools.adapters.multimodal_kb_search import MultimodalKBSearchTool
+    from app.tools.adapters.image_generation import ImageGenerationTool
+    from app.tools.adapters.video_generation import VideoGenerationTool
     from app.database.session import async_session_factory
     from app.models.tool import Tool
     from sqlalchemy import select
@@ -41,6 +43,8 @@ async def register_default_tools():
     registry.register(RefundQueryTool())
     registry.register(LogisticsQueryTool())
     registry.register(MultimodalKBSearchTool())
+    registry.register(ImageGenerationTool())
+    registry.register(VideoGenerationTool())
 
     # Ensure tools exist in database (for execution logging)
     tool_instances = [
@@ -50,6 +54,8 @@ async def register_default_tools():
         RefundQueryTool(),
         LogisticsQueryTool(),
         MultimodalKBSearchTool(),
+        ImageGenerationTool(),
+        VideoGenerationTool(),
     ]
 
     default_tools = [

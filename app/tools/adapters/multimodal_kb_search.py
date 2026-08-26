@@ -75,7 +75,12 @@ class MultimodalKBSearchTool(BaseTool):
                 },
                 "knowledge_base_id": {
                     "type": "integer",
-                    "description": "多模态知识库 ID，不填则使用默认（第一个活跃知识库）",
+                    "description": "多模态知识库 ID，不填则搜索全部活跃知识库并合并结果",
+                },
+                "asset_types": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "素材类型过滤，如 ['image'] 只检索图片素材；不填则不过滤",
                 },
                 "max_results": {
                     "type": "integer",
@@ -102,6 +107,7 @@ class MultimodalKBSearchTool(BaseTool):
                             "content": {"type": "string"},
                             "tags": {"type": "array", "items": {"type": "string"}},
                             "score": {"type": "number"},
+                            "thumbnail_url": {"type": "string"},
                         },
                     },
                 },
@@ -112,7 +118,8 @@ class MultimodalKBSearchTool(BaseTool):
 
     async def execute(self, query: str = None, image_base64: str = None,
                       image_ext: str = "jpg", knowledge_base_id: int = None,
-                      max_results: int = 5, **kwargs) -> ToolResult:
+                      asset_types: List[str] = None, max_results: int = 5,
+                      **kwargs) -> ToolResult:
         """Search the multimodal knowledge base.
 
         Args:
@@ -120,7 +127,10 @@ class MultimodalKBSearchTool(BaseTool):
             image_base64: Optional base64-encoded query image; enables
                 image-to-image or fused text+image retrieval.
             image_ext: Query image file extension (default 'jpg').
-            knowledge_base_id: Optional KB id; defaults to first active KB.
+            knowledge_base_id: Optional KB id; defaults to ALL active KBs.
+            asset_types: Optional list of asset types to filter, e.g.
+                ["image"] to only retrieve image assets (used by the
+                image generation flow to find reference assets).
             max_results: Maximum assets to return.
         """
         import base64 as b64_mod
@@ -151,9 +161,13 @@ class MultimodalKBSearchTool(BaseTool):
                     )
 
             async with async_session_factory() as db:
-                # 1. Resolve target KB
-                kb_id = knowledge_base_id
-                if not kb_id:
+                # 1. Resolve target KB(s)
+                #    - knowledge_base_id given  → search that KB only
+                #    - otherwise                → search ALL active KBs and merge
+                #      (previous behaviour of picking only the first active KB
+                #       silently missed assets living in other KBs)
+                kb_ids = [knowledge_base_id] if knowledge_base_id else []
+                if not kb_ids:
                     kbs = await knowledge_base_repo.list_kbs(db)
                     active = [k for k in kbs if k.is_active and k.status == "active"]
                     if not active:
@@ -165,20 +179,41 @@ class MultimodalKBSearchTool(BaseTool):
                                 "message": "多模态知识库为空或无活跃知识库",
                             },
                         )
-                    kb_id = active[0].id
+                    kb_ids = [k.id for k in active]
 
-                # 2. Vector search (text / image / fused)
-                result = await search_service.search(
-                    db,
-                    knowledge_base_id=kb_id,
-                    query=query,
-                    query_image_data=query_image_data,
-                    query_image_ext=image_ext or "jpg",
-                    top_k=max_results,
-                )
+                # 2. Vector search (text / image / fused) across KBs
+                merged: List[Dict[str, Any]] = []
+                seen_assets = set()
+                query_type = "text"
+                first_error = None
+                for kid in kb_ids:
+                    result = await search_service.search(
+                        db,
+                        knowledge_base_id=kid,
+                        query=query,
+                        query_image_data=query_image_data,
+                        query_image_ext=image_ext or "jpg",
+                        asset_types=asset_types,
+                        top_k=max_results,
+                    )
+                    if "error" in result:
+                        first_error = first_error or result["error"]
+                        continue
+                    query_type = result.get("query_type", query_type)
+                    for item in result.get("results", []):
+                        aid = item.get("asset_id")
+                        if aid in seen_assets:
+                            continue
+                        seen_assets.add(aid)
+                        item["_kb_id"] = kid
+                        merged.append(item)
 
-            if "error" in result:
-                return ToolResult(success=False, error=result["error"])
+            if not kb_ids or (first_error and not merged):
+                return ToolResult(success=False, error=first_error or "检索失败")
+
+            # Sort merged hits by score desc, keep top_k
+            merged.sort(key=lambda x: float(x.get("score", 0.0)), reverse=True)
+            result = {"results": merged[:max_results], "query_type": query_type}
 
             # 3. Build structured results
             assets: List[Dict[str, Any]] = []
@@ -191,12 +226,15 @@ class MultimodalKBSearchTool(BaseTool):
                     "content": item.get("content"),
                     "tags": item.get("tags", []),
                     "score": round(float(item.get("score", 0.0)), 4),
+                    # Thumbnail URL so the LLM can display image assets inline
+                    "thumbnail_url": item.get("thumbnail_url"),
+                    "knowledge_base_id": item.get("_kb_id"),
                 })
 
             total = len(assets)
             logger.info(
                 f"MultimodalKBSearch executed | query={str(query)[:50]} | "
-                f"mode={result.get('query_type')} | kb={kb_id} | results={total}"
+                f"mode={result.get('query_type')} | kbs={kb_ids} | results={total}"
             )
 
             return ToolResult(
@@ -204,7 +242,7 @@ class MultimodalKBSearchTool(BaseTool):
                 data={
                     "query": query,
                     "query_type": result.get("query_type", "text"),
-                    "knowledge_base_id": kb_id,
+                    "knowledge_base_ids": kb_ids,
                     "assets": assets,
                     "total": total,
                 },
