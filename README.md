@@ -440,4 +440,20 @@ curl -X POST http://your-server/api/v1/conversations/chat \
 
 ## 📄 License
 
-本项目暂未设置开源 License，版权归项目所有者所有。如需使用请联系作者。
+本项目基于 **[GNU General Public License v3.0 (GPL-3.0)](LICENSE.md)** 开源发布。
+
+- ✅ 任何人可自由使用、学习、修改和分发本项目（包括商业用途）
+- ⚠️ **Copyleft 传染性**：分发本项目或其衍生作品时，必须以 GPL v3 相同协议开源完整源代码，并保留原版权声明
+
+> 完整许可证文本见 [LICENSE.md](LICENSE.md)（含中文声明）与 [LICENSE](LICENSE)（官方英文原文）。
+
+## 💼 双授权模式 / Dual Licensing
+
+本项目提供两种授权方式，任选其一：
+
+1. **开源授权（GNU GPL v3）**——永久免费。适用于愿意开源衍生作品的使用者；仅内部使用不分发则不触发开源义务
+2. **其他授权方式**——适用于希望以 GPL v3 之外的方式集成或分发本项目的场景，欢迎直接与作者联系洽谈
+
+> 📮 联系方式：通过 GitHub [提交 Issue](https://github.com/scofieldlee/AI_Agent_Platform/issues) 或访问[作者主页](https://github.com/scofieldlee)
+
+Copyright © 2026 AI Agent Platform Contributors
