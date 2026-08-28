@@ -133,7 +133,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { tasksApi } from '@/api/client'
-import dayjs from 'dayjs'
+import { formatTime } from '@/utils/time'
 
 const loading = ref(false)
 const actionLoading = ref(false)
@@ -164,7 +164,7 @@ function priorityColor(p: string) { return { urgent: 'red', high: 'orange', norm
 function priorityLabel(p: string) { return { urgent: '紧急', high: '高', normal: '普通', low: '低' }[p] || p }
 function statusColor(s: string) { return { pending: 'orange', assigned: 'blue', resolved: 'green', closed: 'default' }[s] || 'default' }
 function statusLabel(s: string) { return { pending: '待处理', assigned: '已分配', resolved: '已解决', closed: '已关闭' }[s] || s }
-function formatDate(d: string) { return d ? dayjs(d).format('YYYY-MM-DD HH:mm:ss') : '-' }
+function formatDate(d: string) { return formatTime(d) }
 
 async function fetchTasks() {
   loading.value = true

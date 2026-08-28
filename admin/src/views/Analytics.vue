@@ -86,7 +86,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
 import { analyticsApi } from '@/api/client'
-import dayjs from 'dayjs'
+import { formatTime } from '@/utils/time'
 
 const loading = ref(false)
 const stats = ref<any>({})
@@ -115,7 +115,7 @@ function intentLabel(i: string) {
   const map: Record<string, string> = { product_info: '商品咨询', product_compare: '商品对比', purchase_advice: '购买建议', order_query: '订单查询', after_sale: '售后', complaint: '投诉', greeting: '问候', unknown: '未知' }
   return map[i] || i || '-'
 }
-function formatDate(d: string) { return d ? dayjs(d).format('YYYY-MM-DD HH:mm:ss') : '-' }
+function formatDate(d: string) { return formatTime(d) }
 
 async function onExpand(expanded: boolean, record: any) {
   if (expanded) {

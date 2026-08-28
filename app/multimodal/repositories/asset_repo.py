@@ -13,6 +13,7 @@ from app.multimodal.models import (
 )
 from app.multimodal.constants import (AssetStatus, FileType, TagSource,
                                       ASSET_CODE_PREFIX)
+from app.core.timeutils import now
 
 
 # ---------- CRUD ----------
@@ -298,7 +299,7 @@ async def delete_relation(db: AsyncSession, relation_id: int) -> bool:
 
 async def soft_delete_asset(db: AsyncSession, asset: MultimodalAsset) -> MultimodalAsset:
     """软删除 → 回收站。"""
-    asset.deleted_at = datetime.now(timezone.utc)
+    asset.deleted_at = now()
     asset.status = AssetStatus.DELETED
     await db.flush()
     await db.refresh(asset)

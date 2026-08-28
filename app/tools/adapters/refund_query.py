@@ -12,6 +12,7 @@ import logging
 import re
 from typing import Dict, Any, List
 
+from app.core.timeutils import local_iso
 from app.tools.base import BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -223,7 +224,7 @@ class RefundQueryTool(BaseTool):
                     "status": status,
                     "status_label": STATUS_LABELS.get(status, status),
                     "reason": row.reason or "",
-                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "created_at": local_iso(row.created_at),
                 })
 
             total = len(refunds)

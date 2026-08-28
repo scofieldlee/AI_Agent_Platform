@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import async_session_factory
 from app.models.human_task import HumanTask
+from app.core.timeutils import now as now_tz, local_iso
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ class HumanCenterService:
 
             task.assigned_to = assigned_to
             task.status = "assigned"
-            task.assigned_at = datetime.now(timezone.utc)
+            task.assigned_at = now_tz()
 
             await session.commit()
             await session.refresh(task)
@@ -189,12 +190,12 @@ class HumanCenterService:
             # Auto-assign if was pending
             if task.status == "pending" and assigned_to:
                 task.assigned_to = assigned_to
-                task.assigned_at = datetime.now(timezone.utc)
+                task.assigned_at = now_tz()
 
             task.resolution_note = resolution_note
             task.resolution_type = resolution_type
             task.status = "resolved"
-            task.resolved_at = datetime.now(timezone.utc)
+            task.resolved_at = now_tz()
 
             await session.commit()
             await session.refresh(task)
@@ -329,7 +330,7 @@ class HumanCenterService:
 
         Format: HT20260803001
         """
-        now = datetime.now(timezone.utc)
+        now = now_tz()
         date_str = now.strftime("%Y%m%d")
 
         # Query the count of today's tasks to generate sequence
@@ -366,8 +367,8 @@ class HumanCenterService:
             "resolution_note": task.resolution_note,
             "resolution_type": task.resolution_type,
             "meta": task.meta or {},
-            "created_at": task.created_at.isoformat() if task.created_at else None,
-            "assigned_at": task.assigned_at.isoformat() if task.assigned_at else None,
-            "resolved_at": task.resolved_at.isoformat() if task.resolved_at else None,
+            "created_at": local_iso(task.created_at),
+            "assigned_at": local_iso(task.assigned_at),
+            "resolved_at": local_iso(task.resolved_at),
             "is_open": task.is_open,
         }

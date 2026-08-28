@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.redis_client import redis_client
 from app.multimodal.repositories import processing_repo
 from app.multimodal.constants import TaskStatus
+from app.core.timeutils import now
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ async def mark_processing(db: AsyncSession, task_id: int):
     task = await processing_repo.get_task(db, task_id)
     if task:
         return await processing_repo.update_task(
-            db, task, status=TaskStatus.PROCESSING, started_at=datetime.now(timezone.utc))
+            db, task, status=TaskStatus.PROCESSING, started_at=now())
     return task
 
 
@@ -73,7 +74,7 @@ async def mark_success(db: AsyncSession, task_id: int, output: Optional[dict] = 
     if task:
         return await processing_repo.update_task(
             db, task, status=TaskStatus.SUCCESS, output=output or {},
-            completed_at=datetime.now(timezone.utc))
+            completed_at=now())
     return task
 
 
@@ -83,7 +84,7 @@ async def mark_failed(db: AsyncSession, task_id: int, error: str):
         return await processing_repo.update_task(
             db, task, status=TaskStatus.FAILED, error=error[:5000],
             retry_count=task.retry_count + 1,
-            completed_at=datetime.now(timezone.utc))
+            completed_at=now())
     return task
 
 

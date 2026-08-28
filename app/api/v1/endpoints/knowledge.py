@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
 from app.auth.dependencies import require_permission
+from app.core.timeutils import local_iso
 from app.schemas.knowledge import (
     ChunkResponse, ChunkUpdate, DocumentContentUpdate, DocumentDetailResponse,
     DocumentResponse, DocumentUpdate, ExcelImportResponse, KnowledgeBaseCreate,
@@ -282,8 +283,8 @@ def _doc_to_detail(doc, chunks) -> DocumentDetailResponse:
         status=doc.status,
         chunk_count=doc.chunk_count,
         meta=doc.meta or {},
-        created_at=doc.created_at.isoformat() if getattr(doc, "created_at", None) else None,
-        updated_at=doc.updated_at.isoformat() if getattr(doc, "updated_at", None) else None,
+        created_at=local_iso(getattr(doc, "created_at", None)),
+        updated_at=local_iso(getattr(doc, "updated_at", None)),
         chunks=[ChunkResponse.model_validate(c) for c in chunks],
     )
 

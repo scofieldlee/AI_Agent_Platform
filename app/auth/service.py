@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.user import User, Role, Permission, UserRole, RolePermission
+from app.core.timeutils import now as now_tz
 
 # --- Password hashing ---
 
@@ -35,7 +36,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def create_access_token(user_id: int, username: str, roles: list[str]) -> str:
     """Create a short-lived access token."""
-    now = datetime.now(timezone.utc)
+    now = now_tz()
     payload = {
         "sub": str(user_id),
         "username": username,
@@ -49,7 +50,7 @@ def create_access_token(user_id: int, username: str, roles: list[str]) -> str:
 
 def create_refresh_token(user_id: int) -> str:
     """Create a long-lived refresh token."""
-    now = datetime.now(timezone.utc)
+    now = now_tz()
     payload = {
         "sub": str(user_id),
         "type": "refresh",
@@ -96,7 +97,7 @@ async def authenticate_user(db: AsyncSession, username_or_email: str, password: 
         return None, "Invalid password"
 
     # Update last_login
-    user.last_login = datetime.now(timezone.utc)
+    user.last_login = now_tz()
     await db.flush()
 
     return user, None

@@ -700,6 +700,31 @@
     </div>
 
     <script>
+        // --- 北京时间格式化（后端输出的时间已是北京时间，此处做兜底换算）---
+        const BEIJING_OFFSET_MS = 8 * 60 * 60 * 1000;
+        function fmtBeijing(value) {
+            if (!value) return '-';
+            const raw = String(value).trim();
+            const m = raw.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.(\d+))?\s*(Z|z|[+-]\d{2}:?\d{2})?$/);
+            if (!m) return raw;
+            const [, d, t, fracRaw, offsetRaw] = m;
+            const frac = (fracRaw || '000').slice(0, 3);
+            let offsetMin = 0;
+            if (offsetRaw && offsetRaw !== 'Z' && offsetRaw !== 'z') {
+                const sign = offsetRaw[0] === '-' ? -1 : 1;
+                const digits = offsetRaw.slice(1).replace(':', '');
+                offsetMin = sign * (parseInt(digits.slice(0, 2), 10) * 60 + parseInt(digits.slice(2, 4), 10));
+            }
+            const baseMs = Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10),
+                                    +t.slice(0, 2), +t.slice(3, 5), +t.slice(6, 8), +frac);
+            const dt = new Date(baseMs - offsetMin * 60000 + BEIJING_OFFSET_MS);
+            const pad = (n, len) => String(n).padStart(len || 2, '0');
+            // 无偏移时后端已按北京时间输出，无需换算
+            if (!offsetRaw) return `${d} ${t}`;
+            return `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())} ` +
+                   `${pad(dt.getUTCHours())}:${pad(dt.getUTCMinutes())}:${pad(dt.getUTCSeconds())}`;
+        }
+
         let conversationId = null;
         let agentId = 1;
         let isSending = false;
@@ -952,8 +977,8 @@
                             <tr><td style="padding:6px 0;color:#6b7280;vertical-align:top">AI 预答</td><td style="padding:6px 0;color:#4b5563">${(task.meta && task.meta.agent_answer) ? task.meta.agent_answer.substring(0, 200) : '-'}</td></tr>
                             <tr><td style="padding:6px 0;color:#6b7280">分配给</td><td style="padding:6px 0">${task.assigned_to || '未分配'}</td></tr>
                             <tr><td style="padding:6px 0;color:#6b7280;vertical-align:top">处理记录</td><td style="padding:6px 0">${task.resolution_note || '暂无'}</td></tr>
-                            <tr><td style="padding:6px 0;color:#6b7280">创建时间</td><td style="padding:6px 0">${task.created_at ? new Date(task.created_at).toLocaleString('zh-CN') : '-'}</td></tr>
-                            ${task.resolved_at ? `<tr><td style="padding:6px 0;color:#6b7280">解决时间</td><td style="padding:6px 0">${new Date(task.resolved_at).toLocaleString('zh-CN')}</td></tr>` : ''}
+                            <tr><td style="padding:6px 0;color:#6b7280">创建时间</td><td style="padding:6px 0">${fmtBeijing(task.created_at)}</td></tr>
+                            ${task.resolved_at ? `<tr><td style="padding:6px 0;color:#6b7280">解决时间</td><td style="padding:6px 0">${fmtBeijing(task.resolved_at)}</td></tr>` : ''}
                         </table>
                         <div style="margin-top:16px;text-align:right">
                             <button onclick="this.closest('.ticket-overlay').remove()" style="padding:8px 16px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;font-size:13px">关闭</button>

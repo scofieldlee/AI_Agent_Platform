@@ -97,6 +97,7 @@ import { useRouter } from 'vue-router'
 import { ReloadOutlined, SyncOutlined } from '@ant-design/icons-vue'
 import { multimodalApi } from '@/api/client'
 import { TASK_STATUS } from './types'
+import { formatTime } from '@/utils/time'
 import type { MmProcessingTask } from './types'
 
 const router = useRouter()
@@ -169,7 +170,8 @@ function toggleAuto() {
 }
 
 function fmtTime(t?: string | null): string {
-  return t ? t.slice(0, 19).replace('T', ' ') : '-'
+  // 统一按北京时间显示（后端输出的时间已是北京时间，此处做兜底换算）
+  return formatTime(t, 'second')
 }
 
 onMounted(loadAll)

@@ -11,7 +11,7 @@
             <a-tag :color="statusInfo.color">{{ statusInfo.label }}</a-tag>
           </h2>
           <span class="sub">{{ asset.asset_code }} · {{ formatSize(asset.file_size) }} ·
-            {{ asset.original_filename }} · {{ asset.created_at?.slice(0, 19).replace('T', ' ') }}</span>
+            {{ asset.original_filename }} · {{ formatDateTime(asset.created_at) }}</span>
         </div>
       </div>
       <a-space>
@@ -83,7 +83,7 @@
                 <a-tag :color="TASK_STATUS[t.status]?.color" size="small">
                   {{ TASK_STATUS[t.status]?.label || t.status }}
                 </a-tag>
-                <span class="sub">{{ (t.created_at || '').slice(0, 19).replace('T', ' ') }}</span>
+                <span class="sub">{{ formatDateTime(t.created_at) }}</span>
                 <span v-if="t.retry_count" class="sub">重试 {{ t.retry_count }}</span>
               </div>
               <div v-if="t.error" class="err">{{ t.error }}</div>
@@ -98,7 +98,7 @@
         <a-card size="small" title="AI 分析结果" style="margin-bottom: 16px;">
           <template #extra>
             <a-tag v-if="asset.metadata?.ai?.analyzed_at" color="purple">
-              {{ (asset.metadata.ai.analyzed_at || '').slice(0, 10) }}
+              {{ formatDateTime(asset.metadata.ai.analyzed_at, 'date') }}
             </a-tag>
           </template>
           <div v-if="aiMeta">
@@ -183,6 +183,7 @@ import {
 } from '@ant-design/icons-vue'
 import { multimodalApi } from '@/api/client'
 import { formatSize, formatTime, filePreviewUrl, FILE_TYPE, ASSET_STATUS, TASK_STATUS, UNIT_TYPE, statusTag } from './types'
+import { formatTime as formatDateTime } from '@/utils/time'
 import type { MmAssetDetail, MmProcessingTask } from './types'
 
 const route = useRoute()

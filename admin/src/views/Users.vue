@@ -161,7 +161,7 @@ import { ref, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
 import { authApi } from '@/api/client'
-import dayjs from 'dayjs'
+import { formatTime as fmtTime } from '@/utils/time'
 
 interface UserItem {
   id: number
@@ -248,7 +248,8 @@ function roleColor(code: string): string {
 }
 
 function formatTime(t: string): string {
-  return dayjs(t).format('YYYY-MM-DD HH:mm')
+  // 统一按北京时间显示（后端已输出北京时间，此处做兜底换算）
+  return fmtTime(t, 'minute')
 }
 
 async function loadData() {

@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.session import async_session_factory
 from app.models.memory import Memory
 from app.core.config import settings
+from app.core.timeutils import now, local_iso
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +137,7 @@ class MemoryService:
                             .where(Memory.id.in_(memory_ids_to_update))
                             .values(
                                 access_count=Memory.access_count + 1,
-                                last_accessed_at=datetime.utcnow().isoformat(),
+                                last_accessed_at=local_iso(now()),
                             )
                         )
                         await session.commit()

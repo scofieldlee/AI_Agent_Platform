@@ -463,6 +463,7 @@ import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import '@vue-flow/controls/dist/style.css'
 import '@vue-flow/minimap/dist/style.css'
+import { formatTime as fmtTime } from '@/utils/time'
 
 const themeStore = useThemeStore()
 const isDark = computed(() => themeStore.isDark)
@@ -634,7 +635,7 @@ function intentColor(intent: string | null): string {
 function formatTime(iso: string | null): string {
   if (!iso) return '-'
   try {
-    return new Date(iso).toLocaleString('zh-CN', { hour12: false })
+    return fmtTime(iso)
   } catch {
     return iso
   }

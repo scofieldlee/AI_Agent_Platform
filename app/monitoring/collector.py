@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.database.session import engine, async_session_factory
 from app.database.redis_client import redis_client
+from app.core.timeutils import now, local_iso, from_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -147,9 +148,9 @@ class MetricsCollector:
                 "vms_mb": round(proc_mem.vms / (1024 * 1024), 2),
                 "cpu_percent": proc_cpu,
                 "threads": proc.num_threads(),
-                "create_time": datetime.fromtimestamp(
-                    proc.create_time(), tz=timezone.utc
-                ).isoformat(),
+                "create_time": local_iso(
+                    from_timestamp(proc.create_time())
+                ),
             },
             "uptime_seconds": round(uptime_seconds, 0),
         }
@@ -317,7 +318,7 @@ class MetricsCollector:
             result = await db.execute(trend_query)
             trend = [
                 {
-                    "hour": r.hour.isoformat() if r.hour else None,
+                    "hour": local_iso(r.hour) if r.hour else None,
                     "calls": r.calls,
                     "tokens": r.tokens,
                 }
@@ -412,7 +413,7 @@ class MetricsCollector:
             result = await db.execute(trend_query)
             trace_trend = [
                 {
-                    "hour": r.hour.isoformat() if r.hour else None,
+                    "hour": local_iso(r.hour) if r.hour else None,
                     "traces": r.traces,
                     "success": r.success,
                 }
@@ -490,7 +491,7 @@ class MetricsCollector:
             return v if not isinstance(v, Exception) else default
 
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": local_iso(now()),
             "services": safe(health, {"error": str(health)}),
             "system": safe(sys_res, {"error": str(sys_res)}),
             "database": safe(db_stats, {"error": str(db_stats)}),

@@ -525,8 +525,8 @@ import {
   ExclamationCircleOutlined,
   LinkOutlined, CopyOutlined,
 } from '@ant-design/icons-vue'
-import dayjs from 'dayjs'
 import { agentsApi, toolsApi, knowledgeApi, modelsApi, workflowApi } from '@/api/client'
+import { formatTime } from '@/utils/time'
 
 // --- Agent list ---
 const loading = ref(false)
@@ -609,7 +609,7 @@ function modelTypeLabel(t: string) {
   return ({ chat: '对话', reasoning: '推理', vision: '视觉', embedding: 'Embedding', rerank: 'Rerank', speech: '语音' } as any)[t] || t
 }
 function formatDate(d: string) {
-  return d ? dayjs(d).format('YYYY-MM-DD HH:mm') : '-'
+  return formatTime(d, 'minute')
 }
 
 function getChatUrl(token: string) {

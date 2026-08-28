@@ -223,7 +223,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { InboxOutlined } from '@ant-design/icons-vue'
 import { knowledgeApi } from '@/api/client'
-import dayjs from 'dayjs'
+import { formatTime } from '@/utils/time'
 
 const loading = ref(false)
 const docLoading = ref(false)
@@ -268,7 +268,7 @@ const docColumns = [
   { title: '创建时间', key: 'created_at', width: 160 }
 ]
 
-function formatDate(d: string) { return d ? dayjs(d).format('YYYY-MM-DD HH:mm') : '-' }
+function formatDate(d: string) { return formatTime(d, 'minute') }
 function docStatusLabel(s: string) { return { ready: '就绪', indexing: '索引中', pending: '待处理', failed: '失败' }[s] || s }
 
 async function fetchKBs() {

@@ -12,6 +12,7 @@ from app.models.ai_employee import (
     AIEmployee, AIEmployeeAgent, AIEmployeeTask, AIEmployeeTaskStep,
 )
 from app.models.agent import Agent
+from app.core.timeutils import now as now_tz
 
 
 # ============================================================
@@ -478,7 +479,7 @@ async def fail_orphan_tasks(db: AsyncSession) -> int:
         select(AIEmployeeTask).where(AIEmployeeTask.status == "running")
     )
     orphans = list(result.scalars().all())
-    now = datetime.now(timezone.utc)
+    now = now_tz()
     for task in orphans:
         task.status = "failed"
         task.error = {"code": "service_restarted", "message": "Service restarted while task was running"}

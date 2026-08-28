@@ -17,13 +17,19 @@ from pathlib import Path
 
 import frontmatter
 
+from app.core.timeutils import local_iso
+
 logger = logging.getLogger(__name__)
 
 
 def _sanitize_metadata(obj):
-    """Recursively convert date/datetime objects to ISO strings for JSON serialization."""
+    """Recursively convert date/datetime objects to local ISO strings for JSON serialization.
+
+    带时区的 datetime 统一换算到系统时区（北京时间）后再输出，
+    避免 Obsidian frontmatter 里的 UTC 时间直接落到知识库元信息中。
+    """
     if isinstance(obj, (date, datetime)):
-        return obj.isoformat()
+        return local_iso(obj)
     if isinstance(obj, dict):
         return {k: _sanitize_metadata(v) for k, v in obj.items()}
     if isinstance(obj, list):

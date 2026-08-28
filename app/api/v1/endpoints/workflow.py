@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from app.database.session import get_db
 from app.auth.dependencies import require_permission
+from app.core.timeutils import local_iso
 from app.repositories.analytics_repo import get_trace, get_spans, list_traces
 from app.repositories import workflow_repo
 from app.schemas import workflow as wf_schemas
@@ -143,7 +144,7 @@ async def list_workflow_traces(
             intent=t.intent,
             confidence=t.confidence,
             duration_ms=t.duration_ms,
-            started_at=t.started_at.isoformat() if t.started_at else None,
+            started_at=local_iso(t.started_at),
         )
         for t in traces
     ]
@@ -186,8 +187,8 @@ async def get_execution_path(trace_id: str, db: AsyncSession = Depends(get_db)):
             node_category=category,
             status=span.status or "success",
             duration_ms=span.duration_ms,
-            started_at=span.started_at.isoformat() if span.started_at else None,
-            completed_at=span.completed_at.isoformat() if span.completed_at else None,
+            started_at=local_iso(span.started_at),
+            completed_at=local_iso(span.completed_at),
             attributes=attrs if attrs else None,
         ))
 

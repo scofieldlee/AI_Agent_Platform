@@ -13,6 +13,7 @@ import logging
 import re
 from typing import Dict, Any, List
 
+from app.core.timeutils import local_iso
 from app.tools.base import BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -189,11 +190,7 @@ class LogisticsQueryTool(BaseTool):
                     except Exception:
                         events = []
 
-                estimated_delivery = (
-                    row.estimated_delivery.isoformat()
-                    if row.estimated_delivery
-                    else None
-                )
+                estimated_delivery = local_iso(row.estimated_delivery)
 
                 trackings.append({
                     "tracking_number": row.tracking_number,

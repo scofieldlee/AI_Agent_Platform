@@ -18,6 +18,7 @@ import logging
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any
+from app.core.timeutils import now as now_tz
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ class Tracer:
             from app.database.session import async_session_factory
             from app.models.analytics import AgentTrace
 
-            now = datetime.now(timezone.utc)
+            now = now_tz()
 
             async with async_session_factory() as session:
                 trace = AgentTrace(
@@ -116,7 +117,7 @@ class Tracer:
             from app.models.analytics import AgentTrace
             from sqlalchemy import select
 
-            now = datetime.now(timezone.utc)
+            now = now_tz()
 
             async with async_session_factory() as session:
                 result = await session.execute(
@@ -158,7 +159,7 @@ class Tracer:
                 span.set_output(result)
         """
         span_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
+        now = now_tz()
         ctx = SpanContext(span_id=span_id, trace_id=self.trace_id or "", node_name=node_name)
 
         # Persist span start to DB
@@ -196,7 +197,7 @@ class Tracer:
             from app.models.analytics import AgentSpan
             from sqlalchemy import select
 
-            now = datetime.now(timezone.utc)
+            now = now_tz()
 
             async with async_session_factory() as session:
                 result = await session.execute(

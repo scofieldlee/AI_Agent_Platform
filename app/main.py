@@ -13,6 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 from app.core.config import settings
+from app.core.timeutils import ensure_process_timezone
+from app.core.timezone_middleware import LocalTimezoneMiddleware
 from app.database.session import engine, init_db
 from app.database.redis_client import redis_client, close_redis
 
@@ -148,6 +150,9 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
+    # 进程时区对齐（影响 time.localtime / 日志时间戳等）
+    ensure_process_timezone()
+
     app = FastAPI(
         title=settings.app_name,
         description="Enterprise AI Agent Platform - Infrastructure for Digital Employees",
@@ -165,6 +170,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # 时间统一为系统时区（默认北京时间）：把响应里的 UTC 时间换算成本地时间
+    # 放在 CORS 之后添加 → 处于最外层，改写的是最终响应。
+    app.add_middleware(LocalTimezoneMiddleware)
 
     # --- Routes ---
     from app.api.v1.endpoints import health, agents, conversations, knowledge, tools, analytics, memories, human_tasks, auth, workflow, monitoring, public, models, ai_employees

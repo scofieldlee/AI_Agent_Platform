@@ -102,7 +102,7 @@ import {
 } from '@ant-design/icons-vue'
 import { analyticsApi, tasksApi } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
-import dayjs from 'dayjs'
+import { formatTime } from '@/utils/time'
 
 const authStore = useAuthStore()
 const loading = ref(true)
@@ -179,7 +179,7 @@ const traceColumns = [
   { title: '置信度', dataIndex: 'confidence', key: 'confidence', customRender: ({ text }: any) => text ? (text * 100).toFixed(0) + '%' : '-' },
   { title: '状态', key: 'status' },
   { title: '耗时', key: 'duration' },
-  { title: '时间', dataIndex: 'created_at', key: 'created_at', customRender: ({ text }: any) => text ? dayjs(text).format('MM-DD HH:mm') : '-' }
+  { title: '时间', dataIndex: 'created_at', key: 'created_at', customRender: ({ text }: any) => formatTime(text, 'short') }
 ]
 
 const dataLoaded = ref(false)

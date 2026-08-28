@@ -24,6 +24,7 @@ from app.employee.runtime.exceptions import (
     SupervisorOutputError,
     TaskCancelled,
 )
+from app.core.timeutils import now
 
 # Backward-compatible re-exports (these were previously defined here)
 __all__ = [
@@ -76,7 +77,7 @@ class EmployeeRuntime:
                 await employee_repo.update_task(
                     db, task,
                     status="running",
-                    started_at=datetime.now(timezone.utc),
+                    started_at=now(),
                 )
                 await db.commit()
 
@@ -96,7 +97,7 @@ class EmployeeRuntime:
                     db, task,
                     status="completed",
                     result=final,
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=now(),
                 )
                 await db.commit()
 
@@ -110,7 +111,7 @@ class EmployeeRuntime:
                 await employee_repo.update_task(
                     db, task,
                     status="cancelled",
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=now(),
                     context=ctx.to_dict(),
                 )
                 await db.commit()
@@ -136,7 +137,7 @@ class EmployeeRuntime:
                         "code": "supervisor_invalid_output",
                         "message": str(e)[:1000],
                     },
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=now(),
                     context=ctx.to_dict(),
                 )
                 await db.commit()
@@ -154,7 +155,7 @@ class EmployeeRuntime:
                         "code": "runtime_error",
                         "message": str(e)[:1000],
                     },
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=now(),
                     context=ctx.to_dict(),
                 )
                 await db.commit()

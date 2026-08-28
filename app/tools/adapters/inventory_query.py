@@ -11,6 +11,7 @@ providing real-time inventory data from the business database.
 import logging
 from typing import Dict, Any, List
 
+from app.core.timeutils import local_iso
 from app.tools.base import BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -196,7 +197,7 @@ class InventoryQueryTool(BaseTool):
                     "currency": row.currency,
                     "status": status,
                     "status_label": STATUS_LABELS.get(status, status),
-                    "restock_date": row.restock_date.isoformat() if row.restock_date else None,
+                    "restock_date": local_iso(row.restock_date),
                     "in_stock": in_stock,
                 })
 

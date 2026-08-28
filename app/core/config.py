@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     environment: str = "development"
     secret_key: str = "dev-secret-key"
 
+    # --- Timezone ---
+    # 系统统一时区。默认北京时间；填 "auto" 则跟随主机系统时区。
+    # 时间源始终是主机系统时钟，仅时区偏移按此配置换算。
+    app_timezone: str = "Asia/Shanghai"
+
     # --- Database ---
     database_url: str = "postgresql+asyncpg://scofieldlee@localhost:5432/ai_agent_platform"
     database_sync_url: str = "postgresql://scofieldlee@localhost:5432/ai_agent_platform"

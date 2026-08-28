@@ -74,14 +74,14 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { conversationsApi } from '@/api/client'
-import dayjs from 'dayjs'
+import { formatTime } from '@/utils/time'
 
 const loading = ref(false)
 const conversations = ref<any[]>([])
 const messages = ref<any[]>([])
 const selectedId = ref<string>('')
 
-function formatDate(d: string) { return d ? dayjs(d).format('MM-DD HH:mm') : '-' }
+function formatDate(d: string) { return formatTime(d, 'short') }
 function senderLabel(t: string) {
   return { user: '用户', agent: 'AI Agent', human: '人工客服', system: '系统' }[t] || t
 }

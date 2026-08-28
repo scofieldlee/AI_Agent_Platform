@@ -11,6 +11,7 @@ ProductQueryTool for a full customer service experience.
 import logging
 from typing import Dict, Any, List
 
+from app.core.timeutils import local_iso
 from app.tools.base import BaseTool, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -193,7 +194,7 @@ class OrderQueryTool(BaseTool):
                     "status_label": STATUS_LABELS.get(status, status),
                     "tracking_number": row.tracking_number or "暂无",
                     "carrier": row.carrier or "暂无",
-                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "created_at": local_iso(row.created_at),
                 })
 
             total = len(orders)

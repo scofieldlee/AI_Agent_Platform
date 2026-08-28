@@ -170,6 +170,7 @@ import { monitoringApi } from '@/api/client'
 import SvgGauge from '@/components/charts/SvgGauge.vue'
 import SvgDonut from '@/components/charts/SvgDonut.vue'
 import SvgBars from '@/components/charts/SvgBars.vue'
+import { formatTime as fmtTime } from '@/utils/time'
 
 // ── State ──
 const loading = ref(false)
@@ -251,7 +252,8 @@ function formatUptime(seconds: number): string {
   if (h > 0) return `${h}小时 ${m}分钟`
   return `${m}分钟`
 }
-function formatTime(iso: string): string { return iso ? new Date(iso).toLocaleString('zh-CN') : 'N/A' }
+// 统一按北京时间显示（后端已输出北京时间，此处做兜底换算）
+const formatTime = (iso: string): string => fmtTime(iso)
 
 // ── Data Loading ──
 async function loadData() {

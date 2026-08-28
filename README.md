@@ -111,6 +111,9 @@ DEEPSEEK_API_KEY=sk-your-api-key
 JWT_SECRET_KEY=change-this-to-random-hex
 SECRET_KEY=change-this-to-random-hex
 
+# 时区（可选，默认 Asia/Shanghai；填 auto 则跟随主机系统时区）
+APP_TIMEZONE=Asia/Shanghai
+
 # 多模态 / 千问 Token Plan（可选，用于 Agent 视觉、多模态知识库、图片/视频生成）
 DASHSCOPE_API_KEY=sk-sp-your-plan-key            # Token Plan Key（sk-sp- 前缀）
 DASHSCOPE_BASE_URL=https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
@@ -308,6 +311,35 @@ Agent 对话自动联动多模态检索：
 | Embedding 向量索引 | text-embedding-v4 | 标准 DashScope 端点（双 Key 策略） |
 
 > 注：Token Plan 当前不包含任何 embedding 模型，故索引向量化使用标准端点 Key（费用极低）；其余能力均由 Plan Key（`sk-sp-` 前缀）承载，非 Plan Key 调用生图/生视频时会打印告警日志。
+
+---
+
+## 🕐 时区约定
+
+全平台时间统一为**北京时间（UTC+8）**，时间源取自主机系统时钟。
+
+| 层 | 做法 |
+| --- | --- |
+| 数据库 | 时间列一律 `timestamptz`，存的是**正确瞬时值**，不受时区影响 |
+| 写入 | 统一用 `app.core.timeutils.now()`，替代 `datetime.now(timezone.utc)` / `utcnow()` |
+| 读出 / 输出 | `LocalTimezoneMiddleware` 在 HTTP 出口把 UTC 时间串换算为北京时间；手工拼 dict 处用 `local_iso()` |
+| 前端 | `admin/src/utils/time.ts` 的 `formatTime()`；`static/chat.html` 用 `fmtBeijing()` |
+
+**要点**
+
+- 接口返回的是**不带时区偏移的本地墙钟时间**（如 `2026-08-29T02:38:36.031102`），
+  前端无论是字符串截断、`dayjs()` 还是 `toLocaleString()`，都显示为北京时间。
+- 通过 `APP_TIMEZONE` 可切换时区（默认 `Asia/Shanghai`，填 `auto` 跟随主机系统时区）。
+- 中间件只改写「完整的 JSON 字符串值 + ISO-8601 + UTC 标识（`Z` / `+00:00`）」，
+  不会误伤文本中嵌入的时间片段，也不会对已是本地时间的值二次换算。
+- 流式响应（SSE、文件下载）不做缓冲，直接放行。
+- 历史数据**无需迁移**：库里存的是正确瞬时值，只是之前展示时少了 8 小时换算。
+
+排查脚本（抽查各模块接口返回的时间是否仍为 UTC）：
+
+```bash
+python scripts/check_timezone.py
+```
 
 ---
 

@@ -10,6 +10,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
+from app.core.timeutils import local_iso
 from app.models.user import User, UserRole, Role, RolePermission, Permission
 from app.auth.service import (
     hash_password, verify_password,
@@ -39,7 +40,7 @@ def _user_to_out(user: User, roles: list[str], permissions: list[str]) -> dict:
         "department": user.department,
         "is_active": user.is_active,
         "is_superuser": user.is_superuser,
-        "last_login": user.last_login.isoformat() if user.last_login else None,
+        "last_login": local_iso(user.last_login),
         "roles": roles,
         "permissions": permissions,
     }

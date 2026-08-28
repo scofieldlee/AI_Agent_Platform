@@ -39,6 +39,7 @@ from app.employee.runtime.prompts import (
     build_supervisor_prompt,
     SUPERVISOR_RETRY_SUFFIX,
 )
+from app.core.timeutils import now
 
 logger = logging.getLogger(__name__)
 
@@ -461,7 +462,7 @@ class SupervisorLoop:
         await employee_repo.update_step(
             db, step,
             status="running",
-            started_at=datetime.now(timezone.utc),
+            started_at=now(),
             input={"instruction": instruction[:500],
                    "dispatch_input": dispatch_input},
         )
@@ -487,7 +488,7 @@ class SupervisorLoop:
                         output=result,
                         trace_id=result.get("metadata", {}).get("trace_id"),
                         retry_count=attempt,
-                        completed_at=datetime.now(timezone.utc),
+                        completed_at=now(),
                     )
                     await db.commit()
                     ctx.add_artifact(step_key, result)
@@ -534,7 +535,7 @@ class SupervisorLoop:
             status="failed",
             error={"code": "step_error", "message": last_error},
             retry_count=max_retries,
-            completed_at=datetime.now(timezone.utc),
+            completed_at=now(),
         )
         await db.commit()
         ctx.add_artifact(step_key, failed_result)

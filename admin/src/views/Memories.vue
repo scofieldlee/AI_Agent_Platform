@@ -72,7 +72,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { memoriesApi } from '@/api/client'
-import dayjs from 'dayjs'
+import { formatTime } from '@/utils/time'
 
 const loading = ref(false)
 const memories = ref<any[]>([])
@@ -94,7 +94,7 @@ const columns = [
 
 function typeColor(t: string) { return { preference: 'purple', fact: 'blue', behavior: 'cyan', history: 'orange', skill: 'green' }[t] || 'default' }
 function typeLabel(t: string) { return { preference: '偏好', fact: '事实', behavior: '行为', history: '历史', skill: '技能' }[t] || t }
-function formatDate(d: string) { return d ? dayjs(d).format('YYYY-MM-DD HH:mm') : '-' }
+function formatDate(d: string) { return formatTime(d, 'minute') }
 
 async function fetchMemories() {
   loading.value = true

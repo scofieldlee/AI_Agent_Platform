@@ -11,11 +11,11 @@
 import os
 import shutil
 import time
-from datetime import datetime
 
 import aiofiles
 import aiofiles.os
 
+from app.core.timeutils import local_iso, from_timestamp
 from app.multimodal.adapters.storage.base import StorageAdapter
 
 
@@ -81,7 +81,7 @@ class LocalStorageAdapter(StorageAdapter):
         stat = os.stat(abs_p)
         return {
             "size": stat.st_size,
-            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            "modified": local_iso(from_timestamp(stat.st_mtime)),
             "is_file": os.path.isfile(abs_p),
         }
 

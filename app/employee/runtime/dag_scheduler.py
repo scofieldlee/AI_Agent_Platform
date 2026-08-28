@@ -17,6 +17,7 @@ from app.repositories import employee_repo
 from app.employee.runtime.context import EmployeeContext
 from app.employee.runtime.dispatcher import AgentDispatcher, render_instruction
 from app.employee.runtime.aggregator import ResultAggregator
+from app.core.timeutils import now
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +183,7 @@ class DagScheduler:
         await employee_repo.update_step(
             db, step,
             status="running",
-            started_at=datetime.now(timezone.utc),
+            started_at=now(),
             input={"instruction": instruction[:500], "upstream_keys": upstream_keys},
         )
         await db.commit()
@@ -207,7 +208,7 @@ class DagScheduler:
                     output=result,
                     trace_id=result.get("metadata", {}).get("trace_id"),
                     retry_count=attempt,
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=now(),
                 )
                 await db.commit()
 
@@ -231,7 +232,7 @@ class DagScheduler:
                     status="failed",
                     error={"code": "timeout", "message": f"Timed out after {timeout}s"},
                     retry_count=attempt,
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=now(),
                 )
                 await db.commit()
                 raise StepFailed(step_key, f"Timeout after {timeout}s")
@@ -247,7 +248,7 @@ class DagScheduler:
                     status="failed",
                     error={"code": "step_error", "message": str(e)[:500]},
                     retry_count=attempt,
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=now(),
                 )
                 await db.commit()
                 raise StepFailed(step_key, str(e))
