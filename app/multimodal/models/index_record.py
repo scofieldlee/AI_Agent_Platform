@@ -19,11 +19,15 @@ from app.database.base import Base
 class IndexRecord(Base):
     """多模态向量索引记录。独立于文档知识库的 chunks.embedding，互不干扰。"""
     __tablename__ = "mm_index_records"
-    __table_args__ = (
-        # ivfflat 向量索引必须建在 embedding 列上（kb_id 已由 mapped_column 的 index=True 建立 B-tree 索引）
-        Index("ix_mm_index_embedding", "embedding",
-              postgresql_using="ivfflat", postgresql_ops={"embedding": "vector_cosine_ops"}),
-    )
+
+    # ivfflat/hnsw 索引上限 2000 维；超过（如本地 Qwen3-VL-Embedding 2048 维）
+    # 时退化为精确扫描（无索引全表余弦计算），小数据量场景性能足够、精度更优。
+    if settings.multimodal_embedding_dimension <= 2000:
+        __table_args__ = (
+            Index("ix_mm_index_embedding", "embedding",
+                  postgresql_using="ivfflat",
+                  postgresql_ops={"embedding": "vector_cosine_ops"}),
+        )
 
     knowledge_base_id: Mapped[int] = mapped_column(
         ForeignKey("mm_knowledge_bases.id", ondelete="CASCADE"), nullable=False, index=True)

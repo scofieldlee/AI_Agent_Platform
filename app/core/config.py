@@ -72,7 +72,13 @@ class Settings(BaseSettings):
     qwen_multimodal_embedding_model: str = "multimodal-embedding-one-peace-v1"
     qwen_text_embedding_model: str = "text-embedding-v4"  # 降级用文本 Embedding（1024 维，与多模态同维）
     qwen_asr_model: str = "paraformer-v2"                 # 语音识别模型
-    multimodal_embedding_dimension: int = 1024            # 通义多模态 Embedding 维度
+    multimodal_embedding_dimension: int = 1024            # Embedding 维度（须与 mm_index_records.embedding 列一致）
+
+    # --- 本地多模态 Embedding（llama.cpp llama-server，Qwen3-VL-Embedding-2B）---
+    multimodal_embedding_backend: str = "dashscope"       # dashscope | local（本地 llama-server）
+    local_embedding_base_url: str = "http://127.0.0.1:8088"
+    local_embedding_model: str = "qwen3-vl-embedding"
+    local_embedding_timeout_seconds: int = 180            # CPU 推理图片向量化数秒级，留足超时
 
     # --- Auth / JWT ---
     jwt_secret_key: str = "super-secret-change-in-production-2026"
