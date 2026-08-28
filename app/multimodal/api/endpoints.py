@@ -317,6 +317,23 @@ async def batch_analyze(data: BatchAnalyzeRequest, db: AsyncSession = Depends(ge
     return {"results": results, "total": len(results)}
 
 
+@router.post("/assets/batch-approve", dependencies=[ManagePerm])
+async def batch_approve(data: BatchAnalyzeRequest,
+                        db: AsyncSession = Depends(get_db),
+                        current_user=Depends(get_current_user)):
+    """批量审核通过 → 每个素材自动入队向量化索引。
+
+    非 review_required 状态的素材会被跳过（skipped），不报错。
+    """
+    results = await review_service.batch_approve(db, data.asset_ids, current_user.id)
+    await db.commit()
+    approved = sum(1 for r in results if r.get("status") == "approved")
+    skipped = sum(1 for r in results if r.get("status") == "skipped")
+    errors = sum(1 for r in results if r.get("status") == "error")
+    return {"total": len(results), "approved": approved,
+            "skipped": skipped, "errors": errors, "results": results}
+
+
 @router.get("/assets/{asset_id}/units", dependencies=[ViewPerm])
 async def list_units(asset_id: int, db: AsyncSession = Depends(get_db)):
     """素材知识单元列表。"""

@@ -45,6 +45,24 @@ async def approve_asset(db: AsyncSession, asset_id: int,
     return {"asset_id": asset_id, "status": AssetStatus.INDEXING, "task_id": task.id}
 
 
+async def batch_approve(db: AsyncSession, asset_ids: list,
+                        user_id: Optional[int] = None) -> list:
+    """批量审核通过：逐个复用 approve_asset，跳过非 review_required 状态的素材。
+
+    每个通过审核的素材自动入队向量化索引任务（与单素材审核一致）。
+    """
+    results = []
+    for aid in asset_ids:
+        result = await approve_asset(db, aid, user_id=user_id)
+        if result is None:
+            results.append({"asset_id": aid, "status": "error", "error": "素材不存在"})
+        elif "error" in result:
+            results.append({"asset_id": aid, "status": "skipped", "error": result["error"]})
+        else:
+            results.append({"asset_id": aid, "status": "approved", "task_id": result["task_id"]})
+    return results
+
+
 async def update_user_tags_after_review(db: AsyncSession, asset_id: int,
                                         add_tags: list = None,
                                         remove_tag_ids: list = None,

@@ -33,6 +33,9 @@
         <a-button v-if="selectedIds.length" type="primary" ghost @click="batchAnalyze" :loading="batchLoading">
           <ThunderboltOutlined /> 批量分析 ({{ selectedIds.length }})
         </a-button>
+        <a-button v-if="selectedIds.length" type="primary" @click="batchApprove" :loading="batchApproveLoading">
+          <CheckOutlined /> 审核通过 ({{ selectedIds.length }})
+        </a-button>
       </div>
     </a-card>
 
@@ -117,7 +120,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
   ReloadOutlined, CloudUploadOutlined, ThunderboltOutlined, DatabaseOutlined,
-  DownloadOutlined, DeleteOutlined
+  DownloadOutlined, DeleteOutlined, CheckOutlined
 } from '@ant-design/icons-vue'
 import { multimodalApi } from '@/api/client'
 import { formatSize, fileThumbUrl, ASSET_STATUS, FILE_TYPE, statusTag } from './types'
@@ -222,6 +225,31 @@ async function batchAnalyze() {
     /* interceptor 已提示 */
   } finally {
     batchLoading.value = false
+  }
+}
+
+const batchApproveLoading = ref(false)
+
+async function batchApprove() {
+  batchApproveLoading.value = true
+  try {
+    const res = await multimodalApi.batchApprove(selectedIds.value)
+    const { approved = 0, skipped = 0, errors = 0 } = res.data || {}
+    if (approved > 0) {
+      message.success(`已审核通过 ${approved} 个素材，索引任务已提交`)
+    }
+    if (skipped > 0) {
+      message.warning(`${skipped} 个素材非"待审核"状态，已跳过`)
+    }
+    if (errors > 0) {
+      message.error(`${errors} 个素材处理失败`)
+    }
+    selectedIds.value = []
+    await loadAssets()
+  } catch {
+    /* interceptor 已提示 */
+  } finally {
+    batchApproveLoading.value = false
   }
 }
 

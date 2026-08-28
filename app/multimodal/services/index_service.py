@@ -79,12 +79,22 @@ async def index_asset(db: AsyncSession, asset_id: int) -> Dict[str, Any]:
         return {"success": False, "error": "素材没有知识单元（先完成 AI 分析）"}
 
     indexed, failed = 0, 0
+    import os
     for unit in units:
         # 视觉单元优先图片 Embedding
         image_path = unit.thumbnail_path
         if unit.unit_type == "shot":
             shot = await knowledge_unit_repo.get_video_shot_by_unit(db, unit.id)
             image_path = (shot.keyframe_path if shot else None) or unit.thumbnail_path
+        # 缩略图/关键帧文件缺失时回退到原图，仍缺失则降级为文本 Embedding
+        if image_path and not os.path.exists(storage_service.abs_file_path(image_path)):
+            logger.warning(
+                f"Unit {unit.id} image file missing ({image_path}), "
+                f"falling back to asset original/thumbnail")
+            fallback = asset.storage_path or asset.thumbnail_path
+            image_path = fallback if (
+                fallback and os.path.exists(storage_service.abs_file_path(fallback))
+            ) else None
         ok = await embed_and_index_unit(db, unit, image_path)
         indexed += 1 if ok else 0
         failed += 0 if ok else 1

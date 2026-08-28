@@ -320,6 +320,8 @@ export const multimodalApi = {
   index: (id: number) => client.post(`/multimodal/assets/${id}/index`),
   batchAnalyze: (assetIds: number[]) =>
     client.post('/multimodal/assets/batch-analyze', { asset_ids: assetIds }),
+  batchApprove: (assetIds: number[]) =>
+    client.post('/multimodal/assets/batch-approve', { asset_ids: assetIds }),
   units: (id: number) => client.get(`/multimodal/assets/${id}/units`),
   processing: (id: number, params?: { page?: number; page_size?: number }) =>
     client.get(`/multimodal/assets/${id}/processing`, { params }),
