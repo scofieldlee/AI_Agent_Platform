@@ -20,6 +20,7 @@ from app.multimodal.schemas import (
     AssetUserMetadataUpdate, TagAddRequest, UploadResponse,
     RelationCreate, ApproveRequest, BatchAnalyzeRequest,
     ProcessingTaskListResponse, SearchResponse,
+    BatchDeleteTasksRequest, BatchDeleteTasksResponse, TaskDeleteResponse,
 )
 from app.multimodal.repositories import (
     knowledge_base_repo, asset_repo, processing_repo,
@@ -28,7 +29,7 @@ from app.multimodal.services import (
     asset_service, review_service, search_service, storage_service,
     task_queue_service,
 )
-from app.multimodal.constants import RelationType
+from app.multimodal.constants import RelationType, TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -380,6 +381,57 @@ async def list_tasks(kb_id: Optional[int] = None,
         db, asset_id=asset_id, kb_id=kb_id, task_type=task_type,
         status=status, page=page, page_size=page_size)
     return {"total": total, "items": tasks}
+
+
+@router.delete("/tasks/{task_id}", response_model=TaskDeleteResponse,
+               dependencies=[ManagePerm])
+async def delete_task(task_id: int, db: AsyncSession = Depends(get_db)):
+    """删除单个处理任务。若状态为 pending，会先从 Redis 队列中踢出。"""
+    task = await processing_repo.get_task(db, task_id)
+    if not task:
+        raise HTTPException(404, "任务不存在")
+    if task.status == TaskStatus.PROCESSING:
+        raise HTTPException(409, "正在执行中的任务不能删除，请等待完成或失败后再试")
+    result = await task_queue_service.delete_task(db, task_id)
+    await db.commit()
+    return {"task_id": task_id, "deleted": result["deleted"],
+            "removed_from_queue": result["removed_from_queue"], "error": None}
+
+
+@router.delete("/tasks", response_model=BatchDeleteTasksResponse,
+               dependencies=[ManagePerm])
+async def batch_delete_tasks(data: BatchDeleteTasksRequest,
+                             db: AsyncSession = Depends(get_db)):
+    """批量删除处理任务。仅删除 pending / failed / success，不会删除执行中任务。"""
+    results = []
+    deleted = 0
+    removed_total = 0
+    for tid in data.task_ids:
+        task = await processing_repo.get_task(db, tid)
+        if not task:
+            results.append(TaskDeleteResponse(
+                task_id=tid, deleted=False, removed_from_queue=0,
+                error="任务不存在"))
+            continue
+        if task.status == TaskStatus.PROCESSING:
+            results.append(TaskDeleteResponse(
+                task_id=tid, deleted=False, removed_from_queue=0,
+                error="执行中的任务不能删除"))
+            continue
+        result = await task_queue_service.delete_task(db, tid)
+        deleted += 1 if result["deleted"] else 0
+        removed_total += result.get("removed_from_queue", 0)
+        results.append(TaskDeleteResponse(
+            task_id=tid, deleted=result["deleted"],
+            removed_from_queue=result.get("removed_from_queue", 0),
+            error=None))
+    await db.commit()
+    return {
+        "total": len(data.task_ids),
+        "deleted": deleted,
+        "removed_from_queue": removed_total,
+        "results": results,
+    }
 
 
 # ============================================================

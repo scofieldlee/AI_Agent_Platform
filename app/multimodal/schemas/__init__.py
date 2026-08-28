@@ -16,6 +16,7 @@ from app.multimodal.schemas.knowledge_unit import (
 from app.multimodal.schemas.processing import (
     ProcessingTaskResponse, ProcessingTaskListResponse,
     TaskTriggerResponse, BatchAnalyzeRequest,
+    BatchDeleteTasksRequest, BatchDeleteTasksResponse, TaskDeleteResponse,
 )
 from app.multimodal.schemas.search import SearchRequest, SearchResponse, SearchResultItem
 
@@ -29,5 +30,6 @@ __all__ = [
     "VideoShotResponse", "AudioSegmentResponse", "PptSlideResponse",
     "ProcessingTaskResponse", "ProcessingTaskListResponse",
     "TaskTriggerResponse", "BatchAnalyzeRequest",
+    "BatchDeleteTasksRequest", "BatchDeleteTasksResponse", "TaskDeleteResponse",
     "SearchRequest", "SearchResponse", "SearchResultItem",
 ]

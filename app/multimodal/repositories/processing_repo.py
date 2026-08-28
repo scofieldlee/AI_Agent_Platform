@@ -76,3 +76,13 @@ async def find_retryable_failed_tasks(db: AsyncSession, limit: int = 20) -> List
                ProcessingTask.retry_count < 3)
         .order_by(ProcessingTask.created_at.asc()).limit(limit))
     return list(result.scalars().all())
+
+
+async def delete_task(db: AsyncSession, task_id: int) -> bool:
+    """删除任务记录。返回是否成功删除。"""
+    task = await get_task(db, task_id)
+    if not task:
+        return False
+    await db.delete(task)
+    await db.flush()
+    return True

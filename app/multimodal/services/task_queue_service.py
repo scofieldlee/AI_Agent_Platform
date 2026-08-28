@@ -94,3 +94,32 @@ async def get_queue_depth() -> int:
         return await redis_client.llen(TASK_QUEUE_KEY)
     except Exception:
         return -1
+
+
+async def remove_from_queue(task_id: int) -> int:
+    """把指定任务从 Redis 队列中移除。返回移除条数（0 表示不在队列里）。"""
+    target = json.dumps({"task_id": task_id})
+    try:
+        return await redis_client.lrem(TASK_QUEUE_KEY, 0, target) or 0
+    except Exception as e:
+        logger.warning(f"Failed to remove task #{task_id} from queue: {e}")
+        return 0
+
+
+async def delete_task(db: AsyncSession, task_id: int) -> dict:
+    """删除任务：如果还在 pending 状态，先从队列踢出，再删库记录。
+
+    Returns:
+        {"deleted": bool, "removed_from_queue": int, "task_id": int}
+    """
+    task = await processing_repo.get_task(db, task_id)
+    if not task:
+        return {"deleted": False, "removed_from_queue": 0, "task_id": task_id}
+
+    removed = 0
+    if task.status == TaskStatus.PENDING:
+        removed = await remove_from_queue(task_id)
+
+    await db.delete(task)
+    await db.flush()
+    return {"deleted": True, "removed_from_queue": removed, "task_id": task_id}

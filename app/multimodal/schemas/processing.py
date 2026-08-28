@@ -42,3 +42,24 @@ class TaskTriggerResponse(BaseModel):
 class BatchAnalyzeRequest(BaseModel):
     """批量分析请求."""
     asset_ids: List[int] = Field(..., min_length=1)
+
+
+class BatchDeleteTasksRequest(BaseModel):
+    """批量删除处理任务请求."""
+    task_ids: List[int] = Field(..., min_length=1)
+
+
+class TaskDeleteResponse(BaseModel):
+    """删除任务响应."""
+    task_id: int
+    deleted: bool
+    removed_from_queue: int
+    error: Optional[str] = None
+
+
+class BatchDeleteTasksResponse(BaseModel):
+    """批量删除任务响应."""
+    total: int
+    deleted: int
+    removed_from_queue: int
+    results: List[TaskDeleteResponse]

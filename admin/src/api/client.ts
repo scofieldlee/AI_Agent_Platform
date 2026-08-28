@@ -332,6 +332,9 @@ export const multimodalApi = {
     status?: string; page?: number; page_size?: number;
   }) => client.get('/multimodal/tasks', { params }),
   queueStatus: () => client.get('/multimodal/queue/status'),
+  deleteTask: (id: number) => client.delete(`/multimodal/tasks/${id}`),
+  batchDeleteTasks: (taskIds: number[]) =>
+    client.delete('/multimodal/tasks', { data: { task_ids: taskIds } }),
 
   // --- 审核 ---
   approve: (id: number, userMetadata?: Record<string, any>) =>

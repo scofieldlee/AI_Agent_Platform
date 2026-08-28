@@ -28,6 +28,17 @@
       </a-col>
     </a-row>
 
+    <!-- 批量操作栏 -->
+    <a-card v-if="selectedRowKeys.length" size="small" style="margin-bottom: 16px; background: #fff2f0; border-color: #ffccc7;">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <span style="color: #ff4d4f; font-weight: 500;">已选择 {{ selectedRowKeys.length }} 条任务</span>
+        <a-button type="primary" danger size="small" :loading="batchDeleting" @click="confirmBatchDelete">
+          <DeleteOutlined /> 批量删除
+        </a-button>
+        <a-button size="small" @click="selectedRowKeys = []">取消</a-button>
+      </div>
+    </a-card>
+
     <!-- 筛选 -->
     <a-card size="small" style="margin-bottom: 16px;">
       <div style="display: flex; gap: 12px; flex-wrap: wrap;">
@@ -41,6 +52,7 @@
 
     <!-- 任务表 -->
     <a-table :data-source="tasks" :loading="loading" row-key="id" :pagination="pagination"
+      :row-selection="{ selectedRowKeys, onChange: onSelectChange }"
       @change="onTableChange" size="middle">
       <a-table-column title="ID" dataIndex="id" :width="70" />
       <a-table-column title="任务" :width="100">
@@ -87,14 +99,31 @@
           </div>
         </template>
       </a-table-column>
+      <a-table-column title="操作" :width="90" fixed="right">
+        <template #default="{ record }">
+          <a-popconfirm
+            title="确定删除该任务？"
+            description="执行中的任务不能删除；pending 任务会同时从队列踢出。"
+            ok-text="删除"
+            cancel-text="取消"
+            :disabled="record.status === 'processing'"
+            @confirm="deleteOne(record.id)"
+          >
+            <a-button type="link" danger size="small" :disabled="record.status === 'processing'">
+              <DeleteOutlined /> 删除
+            </a-button>
+          </a-popconfirm>
+        </template>
+      </a-table-column>
     </a-table>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, h, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ReloadOutlined, SyncOutlined } from '@ant-design/icons-vue'
+import { message, Modal } from 'ant-design-vue'
+import { ExclamationCircleOutlined, ReloadOutlined, SyncOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import { multimodalApi } from '@/api/client'
 import { TASK_STATUS } from './types'
 import { formatTime } from '@/utils/time'
@@ -113,9 +142,11 @@ let timer: ReturnType<typeof setInterval> | null = null
 const filters = ref<{ task_type?: string; status?: string }>({})
 const statusOptions = Object.entries(TASK_STATUS).map(([value, s]) => ({ label: s.label, value }))
 
+const selectedRowKeys = ref<(string | number)[]>([])
+const batchDeleting = ref(false)
+
 const statusCounts = computed(() => {
   const counts: Record<string, number> = {}
-  // 近 500 条内统计（当前页数据 + 无过滤时用概略值）
   tasks.value.forEach(t => { counts[t.status] = (counts[t.status] || 0) + 1 })
   return counts
 })
@@ -159,6 +190,10 @@ function onTableChange(pag: any) {
   loadAll()
 }
 
+function onSelectChange(keys: (string | number)[]) {
+  selectedRowKeys.value = keys
+}
+
 function toggleAuto() {
   autoRefresh.value = !autoRefresh.value
   if (autoRefresh.value) {
@@ -169,8 +204,51 @@ function toggleAuto() {
   }
 }
 
+async function deleteOne(id: number) {
+  try {
+    const res = await multimodalApi.deleteTask(id)
+    const { removed_from_queue } = res.data
+    message.success(
+      removed_from_queue
+        ? `任务 #${id} 已删除并从队列中踢出`
+        : `任务 #${id} 已删除`
+    )
+    selectedRowKeys.value = selectedRowKeys.value.filter(k => k !== id)
+    loadAll()
+  } catch (e: any) {
+    message.error(e.response?.data?.detail || `删除任务 #${id} 失败`)
+  }
+}
+
+function confirmBatchDelete() {
+  const ids = selectedRowKeys.value.map(k => Number(k))
+  Modal.confirm({
+    title: '批量删除处理任务',
+    icon: h(ExclamationCircleOutlined),
+    content: `已选择 ${ids.length} 条任务。pending 任务会同时从队列中踢出，执行中的任务不会被删除。`,
+    okText: '确认删除',
+    okType: 'danger',
+    cancelText: '取消',
+    async onOk() {
+      batchDeleting.value = true
+      try {
+        const res = await multimodalApi.batchDeleteTasks(ids)
+        const { deleted, removed_from_queue } = res.data
+        message.success(
+          `已删除 ${deleted}/${ids.length} 条任务${removed_from_queue ? `，从队列踢出 ${removed_from_queue} 条` : ''}`
+        )
+        selectedRowKeys.value = []
+        loadAll()
+      } catch (e: any) {
+        message.error(e.response?.data?.detail || '批量删除失败')
+      } finally {
+        batchDeleting.value = false
+      }
+    }
+  })
+}
+
 function fmtTime(t?: string | null): string {
-  // 统一按北京时间显示（后端输出的时间已是北京时间，此处做兜底换算）
   return formatTime(t, 'second')
 }
 
