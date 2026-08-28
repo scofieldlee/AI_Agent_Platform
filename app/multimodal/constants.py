@@ -63,11 +63,12 @@ class FileType:
 
 
 class UnitType:
-    """KnowledgeUnit 类型: 图片整体 / 视频镜头 / 音频分段 / PPT 页"""
+    """KnowledgeUnit 类型: 图片整体 / 视频镜头 / 音频分段 / PPT 页 / 文档片段"""
     IMAGE = "image"
     SHOT = "shot"
     SEGMENT = "segment"
     SLIDE = "slide"
+    TEXT = "text"
 
 
 class MetadataType:

@@ -138,7 +138,8 @@ export const UNIT_TYPE: Record<string, string> = {
   image: '整图',
   shot: '视频镜头',
   segment: '音频分段',
-  slide: 'PPT 页'
+  slide: 'PPT 页',
+  text: '文档片段'
 }
 
 export const RELATION_TYPE: Record<string, string> = {

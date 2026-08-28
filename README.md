@@ -256,7 +256,7 @@ ai-agent-platform/
 
 ### 1. 多模态知识库
 
-图片、视频素材的完整生命周期管理：
+图片 / 视频 / 音频 / PDF / 文档素材的完整生命周期管理：
 
 ```
 上传素材 → Redis 任务队列 → Worker 异步处理 → AI 自动分析打标 → 人工审核 → 向量索引 → 三种模式检索
@@ -265,6 +265,8 @@ ai-agent-platform/
 - **视频处理链路**：ffmpeg 抽帧 → PySceneDetect 镜头检测（异常自动降级 ffmpeg scene filter）→ 关键帧提取 → Vision 模型逐镜头分析 → 720p 预览生成
 - **AI 分析**：Token Plan 内视觉模型（qwen3.7-plus）生成内容描述 + AI 标签，进入 `review_required` 待审核状态
 - **向量化索引**：文本 → text-embedding-v4；图片 → 通义多模态 embedding（额度耗尽时自动降级 VL 描述 + 文本向量），1024 维存入 pgvector
+- **文档类素材（PDF / TXT / Markdown / Word）**：pypdf / python-docx 提取文本 → 按页/分块生成检索单元 → LLM 生成整体摘要与标签 → 文本 Embedding 入库（扫描件无文本层时报错提示需 OCR）
+- **音频素材**：DashScope ASR（paraformer）转写 → 按语义分段（15-30s/段）→ 转写文本 Embedding；ASR 不可用时自动降级为按时长切分的元数据分段，仍可按文件名/时间段检索
 - **前端管理台**：6 个页面覆盖知识库卡片、素材库、详情、拖拽上传、任务监控、多模态检索
 
 ### 2. Agent × 多模态知识库

@@ -2,6 +2,10 @@
 
 from app.multimodal.processors import (
     image_processor, video_processor, audio_processor, ppt_processor,
+    document_processor,
 )
 
-__all__ = ["image_processor", "video_processor", "audio_processor", "ppt_processor"]
+__all__ = [
+    "image_processor", "video_processor", "audio_processor",
+    "ppt_processor", "document_processor",
+]

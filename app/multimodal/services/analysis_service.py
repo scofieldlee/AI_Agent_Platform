@@ -118,14 +118,17 @@ async def analyze_audio_unit(db: AsyncSession, asset_id: int, unit: Any,
 async def analyze_asset_dispatch(db: AsyncSession, asset_id: int,
                                  file_type: str) -> Dict[str, Any]:
     """按素材类型分发分析流程（Worker 入口）。"""
+    from app.multimodal.processors import (video_processor, audio_processor,
+                                           ppt_processor, document_processor)
     if file_type == FileType.IMAGE:
         return await analyze_image_asset(db, asset_id)
-    # video / audio / ppt 的分解 + 逐单元分析在各自 Processor 中完成
-    from app.multimodal.processors import video_processor, audio_processor, ppt_processor
+    # video / audio / ppt / document 的分解 + 逐单元分析在各自 Processor 中完成
     if file_type == FileType.VIDEO:
         return await video_processor.process(db, asset_id)
     if file_type == FileType.AUDIO:
         return await audio_processor.process(db, asset_id)
     if file_type == FileType.PPT:
         return await ppt_processor.process(db, asset_id)
+    if file_type in (FileType.PDF, FileType.DOCUMENT):
+        return await document_processor.process(db, asset_id)
     return {"success": False, "error": f"暂不支持的分析类型: {file_type}"}

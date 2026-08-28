@@ -312,7 +312,7 @@ async function saveUserMeta() {
 }
 
 function unitIcon(type: string): string {
-  return { image: '🖼️', shot: '🎬', segment: '🎵', slide: '📊' }[type] || '📦'
+  return { image: '🖼️', shot: '🎬', segment: '🎵', slide: '📊', text: '📄' }[type] || '📦'
 }
 
 onMounted(loadDetail)

@@ -32,7 +32,8 @@ async def embed_and_index_unit(db: AsyncSession, unit: Any,
             abs_path = storage_service.abs_file_path(image_path)
             embedding = await embedding_adapter.embed_image(abs_path)
         elif unit.content:
-            embedding = await embedding_adapter.embed_text(unit.content)
+            # 长文本截断，避免超出 Embedding 模型上下文
+            embedding = await embedding_adapter.embed_text(unit.content[:4000])
         else:
             logger.warning(f"Unit {unit.id} has neither image nor content, skip")
             return False
@@ -80,21 +81,31 @@ async def index_asset(db: AsyncSession, asset_id: int) -> Dict[str, Any]:
 
     indexed, failed = 0, 0
     import os
+    # 仅图片素材允许回退到原图做图片 Embedding；
+    # 其它类型（pdf/文档/音频/ppt）的单元一律走文本 Embedding，
+    # 避免把 PDF/PPT 原始文件路径误传给图片 Embedding。
+    allow_image_fallback = (asset.file_type == "image")
     for unit in units:
         # 视觉单元优先图片 Embedding
         image_path = unit.thumbnail_path
         if unit.unit_type == "shot":
             shot = await knowledge_unit_repo.get_video_shot_by_unit(db, unit.id)
             image_path = (shot.keyframe_path if shot else None) or unit.thumbnail_path
-        # 缩略图/关键帧文件缺失时回退到原图，仍缺失则降级为文本 Embedding
+        # 缩略图/关键帧文件缺失时的回退策略
         if image_path and not os.path.exists(storage_service.abs_file_path(image_path)):
-            logger.warning(
-                f"Unit {unit.id} image file missing ({image_path}), "
-                f"falling back to asset original/thumbnail")
-            fallback = asset.storage_path or asset.thumbnail_path
-            image_path = fallback if (
-                fallback and os.path.exists(storage_service.abs_file_path(fallback))
-            ) else None
+            if allow_image_fallback:
+                logger.warning(
+                    f"Unit {unit.id} image file missing ({image_path}), "
+                    f"falling back to asset original/thumbnail")
+                fallback = asset.storage_path or asset.thumbnail_path
+                image_path = fallback if (
+                    fallback and os.path.exists(storage_service.abs_file_path(fallback))
+                ) else None
+            else:
+                logger.warning(
+                    f"Unit {unit.id} image file missing ({image_path}), "
+                    f"degrade to text embedding")
+                image_path = None
         ok = await embed_and_index_unit(db, unit, image_path)
         indexed += 1 if ok else 0
         failed += 0 if ok else 1
