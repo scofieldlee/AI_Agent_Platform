@@ -60,9 +60,11 @@ async def execute_task(task_id: int) -> None:
                 task = await task_queue_service.mark_failed(db, task_id, error)
                 await db.commit()
                 logger.error(f"Task {task_id} ({task_type}) failed: {error}")
-                # 失败重试
+                # 失败重试；重试耗尽则回退素材状态，避免永久锁死
                 if task and task.retry_count < MAX_RETRY:
                     await _retry_later(task_id)
+                else:
+                    await _abandon_asset(db, task_id)
             else:
                 await task_queue_service.mark_success(db, task_id, output or {})
                 await db.commit()
@@ -81,6 +83,8 @@ async def execute_task(task_id: int) -> None:
                 t = await processing_repo.get_task(db, task_id)
                 if t and t.retry_count <= MAX_RETRY:
                     await _retry_later(task_id)
+                else:
+                    await _abandon_asset(db, task_id)
             except Exception as retry_err:
                 logger.error(f"Task {task_id} mark_failed also failed: {retry_err}")
 
@@ -89,6 +93,49 @@ async def _retry_later(task_id: int, delay_key: str = "retry") -> None:
     """失败任务重新入队。"""
     await task_queue_service.enqueue(task_id)
     logger.info(f"Task {task_id} re-enqueued for retry")
+
+
+async def _abandon_asset(db, task_id: int) -> None:
+    """任务重试耗尽后回退素材状态。
+
+    ⚠️ 历史坑位：素材在进入分析/索引前会被置为 `analyzing` / `indexing`，
+    若任务最终失败且未回退，素材会永久卡在中间态，造成两个后果：
+      1. 前端一直显示"处理中"，看不到失败原因
+      2. `trigger_analysis` 判定 status in (processing, analyzing) → 返回
+         409「素材正在处理中，请稍候」→ 用户再也点不动"重新分析"
+
+    这里的回退策略：
+      - 分析任务失败 → FAILED（需重新上传或人工排查后重跑）
+      - 索引任务失败 → 退回 REVIEW_REQUIRED（分析结果仍在，可重新索引/审核）
+      - 仅当素材当前确实处于对应的中间态时才回退，不覆盖其它状态
+    """
+    from app.multimodal.repositories import processing_repo, asset_repo
+    from app.multimodal.constants import AssetStatus, TaskType
+
+    try:
+        task = await processing_repo.get_task(db, task_id)
+        if not task or not task.asset_id:
+            return
+        asset = await asset_repo.get_asset(db, task.asset_id)
+        if not asset:
+            return
+
+        if task.task_type == TaskType.INDEX:
+            if asset.status != AssetStatus.INDEXING:
+                return
+            target = AssetStatus.REVIEW_REQUIRED
+        else:
+            if asset.status not in (AssetStatus.ANALYZING, AssetStatus.PROCESSING):
+                return
+            target = AssetStatus.FAILED
+
+        await asset_repo.update_asset(db, asset, {"status": target})
+        await db.commit()
+        logger.warning(
+            f"Task {task_id} exhausted retries, asset #{asset.id} "
+            f"{asset.status} -> {target}")
+    except Exception as e:
+        logger.error(f"Failed to roll back asset status for task {task_id}: {e}")
 
 
 async def _get_file_type(db, asset_id: Optional[int]) -> Optional[str]:
@@ -118,10 +165,46 @@ async def recover_orphan_tasks() -> int:
     return len(orphans)
 
 
+async def recover_stuck_assets() -> int:
+    """启动时回收卡死的素材状态（Worker 被 kill / 崩溃重启的善后）。
+
+    素材进入分析/索引前被置为 analyzing / processing / indexing。若 Worker 在任务
+    完成前被杀掉，且该素材已无 pending/processing 的任务，状态就永远不会变化：
+    前端显示"处理中"，重新触发又被 409 拦下。这里按"最终失败"规则回退，
+    让用户能立刻点"重新分析"。
+    """
+    from sqlalchemy import select
+    from app.multimodal.models import MultimodalAsset, ProcessingTask
+    from app.multimodal.constants import AssetStatus, TaskStatus
+
+    in_flight = [AssetStatus.PROCESSING, AssetStatus.ANALYZING, AssetStatus.INDEXING]
+    fixed = 0
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(MultimodalAsset).where(MultimodalAsset.status.in_(in_flight)))
+        stuck = list(result.scalars().all())
+        for a in stuck:
+            active = (await db.execute(
+                select(ProcessingTask.id).where(
+                    ProcessingTask.asset_id == a.id,
+                    ProcessingTask.status.in_(
+                        [TaskStatus.PENDING, TaskStatus.PROCESSING])))).first()
+            if active:  # 仍有未完成任务，交给任务流程处理
+                continue
+            a.status = (AssetStatus.REVIEW_REQUIRED
+                        if a.status == AssetStatus.INDEXING else AssetStatus.FAILED)
+            fixed += 1
+        if fixed:
+            await db.commit()
+            logger.info(f"Recovered {fixed} stuck assets -> failed/review_required")
+    return fixed
+
+
 async def main():
     """Worker 主循环。"""
     logger.info("Multimodal worker starting...")
     await recover_orphan_tasks()
+    await recover_stuck_assets()
 
     while not _shutdown.is_set():
         try:

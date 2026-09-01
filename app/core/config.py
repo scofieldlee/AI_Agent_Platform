@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     multimodal_max_audio_mb: int = 200                    # 音频大小上限 (MB)
     multimodal_max_ppt_mb: int = 100                      # PPT 大小上限 (MB)
 
+    # --- 视频镜头检测（ffmpeg scene 阈值切片）---
+    video_shot_threshold: float = 0.3                     # ffmpeg scene 分数阈值（0.1 极敏感 / 0.3 默认 / 0.5 保守）
+    video_min_shot_seconds: float = 1.5                   # 短于该时长的镜头合并入相邻镜头（避免碎片）
+    video_max_shots: int = 40                             # 单个视频最多保留镜头数（按场景分数取 topN，控制 VL 调用成本）
+    video_shot_backend: str = "ffmpeg"                    # ffmpeg（稳定）| scenedetect（PySceneDetect，需 OpenCV<5）
+
     # --- DashScope (通义千问) ---
     dashscope_api_key: str = ""                           # DASHSCOPE_API_KEY (Plan Key，聊天/视觉)
     dashscope_base_url: str = ""                          # DASHSCOPE_BASE_URL (OpenAI 兼容端点；空则用标准端点)

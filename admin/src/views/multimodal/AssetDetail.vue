@@ -32,11 +32,36 @@
         <a-card size="small" title="预览" style="margin-bottom: 16px;">
           <div class="preview-box">
             <img v-if="asset.file_type === 'image' && previewSrc" :src="previewSrc" alt="" />
-            <video v-else-if="asset.file_type === 'video' && previewSrc" :src="previewSrc" controls />
+            <video v-else-if="asset.file_type === 'video' && previewSrc" ref="videoRef"
+              :src="previewSrc" controls @timeupdate="onTimeUpdate" />
             <audio v-else-if="asset.file_type === 'audio' && previewSrc" :src="previewSrc" controls />
             <img v-else-if="asset.preview_path" :src="`/api/v1/multimodal/files/${asset.preview_path}`" alt="" />
             <div v-else class="no-preview">{{ typeInfo.icon }} 该类型暂不支持在线预览</div>
           </div>
+
+          <!-- 视频镜头时间轴（点击关键帧跳转到对应镜头） -->
+          <template v-if="shotUnits.length">
+            <a-divider style="margin: 14px 0 10px;" />
+            <div class="tl-head">
+              <b>镜头时间轴</b>
+              <a-tag color="geekblue">{{ shotUnits.length }} 个镜头</a-tag>
+              <span class="sub">点击缩略图跳转到该镜头</span>
+            </div>
+            <div class="tl-strip">
+              <div v-for="(u, i) in shotUnits" :key="u.id" class="tl-item"
+                :class="{ active: currentShotIndex === i }" :title="u.description || `镜头 ${i + 1}`"
+                @click="seekTo(u)">
+                <div class="tl-thumb">
+                  <img v-if="u.thumbnail_url" :src="u.thumbnail_url" :alt="`镜头 ${i + 1}`" loading="lazy" />
+                  <span v-else class="tl-empty">{{ i + 1 }}</span>
+                  <span class="tl-idx">#{{ i + 1 }}</span>
+                </div>
+                <div class="tl-time">{{ formatTime(u.start_time) }}</div>
+              </div>
+            </div>
+          </template>
+          <a-empty v-else-if="asset.file_type === 'video' && !loading" :image-style="{ height: '40px' }"
+            description="暂无镜头切片，请先执行 AI 分析" style="margin: 10px 0 0;" />
         </a-card>
 
         <!-- 知识单元 -->
@@ -210,6 +235,26 @@ const sysMeta = computed(() => {
 })
 const userMeta = ref<Record<string, string>>({ category: '', usage: '', copyright: '', remark: '' })
 
+// --- 视频镜头时间轴 ---
+const videoRef = ref<HTMLVideoElement | null>(null)
+const currentShotIndex = ref(-1)
+const shotUnits = computed(() => units.value.filter(u => u.unit_type === 'shot'))
+
+function seekTo(u: any) {
+  const v = videoRef.value
+  if (!v || u.start_time == null) return
+  v.currentTime = Number(u.start_time)
+  v.play().catch(() => { /* 浏览器可能拦截自动播放，忽略 */ })
+}
+
+function onTimeUpdate() {
+  const v = videoRef.value
+  if (!v) return
+  const t = v.currentTime
+  currentShotIndex.value = shotUnits.value.findIndex(
+    u => t >= Number(u.start_time ?? 0) && t < Number(u.end_time ?? 0))
+}
+
 async function loadDetail() {
   loading.value = true
   try {
@@ -345,6 +390,73 @@ onMounted(loadDetail)
   opacity: 0.5;
   padding: 40px;
   font-size: 15px;
+}
+/* --- 镜头时间轴 --- */
+.tl-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.tl-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+.tl-item {
+  flex-shrink: 0;
+  width: 104px;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 3px;
+  border: 2px solid transparent;
+  transition: border-color 0.15s, background 0.15s;
+}
+.tl-item:hover {
+  background: rgba(128, 128, 128, 0.1);
+}
+.tl-item.active {
+  border-color: #1677ff;
+  background: rgba(22, 119, 255, 0.08);
+}
+.tl-thumb {
+  position: relative;
+  width: 96px;
+  height: 54px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(128, 128, 128, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tl-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.tl-empty {
+  opacity: 0.5;
+  font-size: 16px;
+}
+.tl-idx {
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 10px;
+  line-height: 14px;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+.tl-time {
+  font-size: 11px;
+  opacity: 0.6;
+  text-align: center;
+  margin-top: 3px;
 }
 .unit-list {
   max-height: 460px;

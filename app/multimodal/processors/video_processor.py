@@ -7,10 +7,13 @@ import asyncio
 import json
 import logging
 import os
+import shutil
+from functools import lru_cache
 from typing import Dict, Any, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.multimodal.constants import AssetStatus, UnitType, UnitStatus
 from app.multimodal.repositories import asset_repo, knowledge_unit_repo
 from app.multimodal.services import analysis_service, storage_service
@@ -18,9 +21,41 @@ from app.multimodal.adapters.storage.local_storage import LocalStorageAdapter
 
 logger = logging.getLogger(__name__)
 
+# ffmpeg/ffprobe 常见安装位置（homebrew / 源码编译 / 系统包管理器）
+_BIN_SEARCH_DIRS = (
+    "/usr/local/bin", "/opt/homebrew/bin", "/opt/local/bin",
+    "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+)
+
+
+@lru_cache(maxsize=None)
+def _resolve_bin(name: str) -> str:
+    """解析外部命令绝对路径。
+
+    ⚠️ 历史坑位：直接 `subprocess_exec("ffmpeg", ...)` 依赖进程继承的 PATH。
+    launchd / systemd / cron 拉起的 Worker 的 PATH 通常只有 `/usr/bin:/bin`，
+    而 homebrew 装的 ffmpeg 在 `/usr/local/bin` → FileNotFoundError。
+    故这里做 which + 常见目录兜底，找到即用绝对路径调用。
+    """
+    found = shutil.which(name)
+    if found:
+        return found
+    for d in _BIN_SEARCH_DIRS:
+        p = os.path.join(d, name)
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            logger.debug(f"Resolved {name} -> {p} (not on PATH)")
+            return p
+    logger.warning(f"Command '{name}' not found on PATH or in {_BIN_SEARCH_DIRS}")
+    return name  # 保留原名，由调用方产生明确错误
+
 
 async def _run(cmd: List[str], timeout: int = 600) -> tuple:
-    """执行本地命令，返回 (returncode, stdout, stderr)。"""
+    """执行本地命令，返回 (returncode, stdout, stderr)。
+
+    命令名（非路径）会先经 _resolve_bin 解析为绝对路径。
+    """
+    if cmd and not os.path.isabs(cmd[0]) and "/" not in cmd[0]:
+        cmd = [_resolve_bin(cmd[0])] + list(cmd[1:])
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
@@ -112,39 +147,167 @@ async def generate_thumbnail(db_asset, abs_path: str) -> Optional[str]:
 
 
 async def detect_shots(abs_path: str) -> List[Dict[str, float]]:
-    """镜头检测。优先 PySceneDetect，降级 ffmpeg 场景阈值。
+    """镜头检测。返回 [{start, end, score}]（秒，按时间升序，首尾闭合）。
 
-    返回 [{start, end}]（秒）。
+    三级策略：
+      1. PySceneDetect（可选后端，需 video_shot_backend=scenedetect）
+      2. ffmpeg scene filter（**主路径**）
+      3. 等间隔兜底（固定 ~10s 一段，优于"整段 1 个镜头"）
+
+    ⚠️ 历史坑位（勿回退）：
+      - ffmpeg 的 showinfo / metadata 输出走 **stderr 日志流**，不是 stdout。
+        旧实现只读 stdout → 永远匹配不到切点 → 退化为"整段 1 个镜头"。
+      - PySceneDetect 0.7.1 + OpenCV 5.0 不兼容：`CAP_PROP_POS_MSEC` 返回 NaN
+        → `ValueError: cannot convert float NaN to integer`。故默认走 ffmpeg。
+
+    后处理（_postprocess_shots）：合并过短镜头 → 按场景分数保留 topN → 限幅。
     """
-    # 1. PySceneDetect
+    duration = await _get_duration(abs_path)
+    if duration <= 0:
+        logger.warning(f"Cannot probe duration for {abs_path}, fallback to single shot")
+        return _postprocess_shots([], 0.0)
+
+    shots: List[Dict[str, float]] = []
+
+    # 1. PySceneDetect（可选）
+    if settings.video_shot_backend == "scenedetect":
+        shots = await _detect_shots_scenedetect(abs_path)
+
+    # 2. ffmpeg scene filter（主路径）
+    if not shots:
+        shots = await _detect_shots_ffmpeg(abs_path, duration)
+
+    # 3. 等间隔兜底
+    if not shots:
+        logger.info(f"No scene change detected in {abs_path}, fallback to uniform slicing")
+        shots = _uniform_shots(duration)
+
+    return _postprocess_shots(shots, duration)
+
+
+async def _detect_shots_scenedetect(abs_path: str) -> List[Dict[str, float]]:
+    """PySceneDetect ContentDetector。失败返回空列表交由 ffmpeg 兜底。"""
     try:
         from scenedetect import detect, ContentDetector
-        scene_list = detect(abs_path, ContentDetector())
-        shots = [{"start": s[0].get_seconds(), "end": s[1].get_seconds()}
-                 for s in scene_list]
-        if shots:
-            return shots
+        scene_list = await asyncio.to_thread(detect, abs_path, ContentDetector())
+        return [{"start": float(s[0].get_seconds()), "end": float(s[1].get_seconds()),
+                 "score": 0.0} for s in (scene_list or [])]
     except ImportError:
         logger.info("PySceneDetect not installed, fallback to ffmpeg scene filter")
     except Exception as e:
-        logger.warning(f"PySceneDetect failed: {e}, fallback to ffmpeg")
+        # OpenCV 5.x 下 CAP_PROP_POS_MSEC 返回 NaN 会在此抛出 ValueError
+        logger.warning(f"PySceneDetect failed ({type(e).__name__}: {e}), fallback to ffmpeg")
+    return []
 
-    # 2. ffmpeg scene filter（select 场景分数 > 0.3）
-    code, out, _ = await _run([
-        "ffmpeg", "-i", abs_path, "-vf",
-        "select='gt(scene,0.3)',showinfo", "-f", "null", "-"], timeout=1800)
-    shots = []
+
+async def _detect_shots_ffmpeg(abs_path: str, duration: float) -> List[Dict[str, float]]:
+    """ffmpeg scene filter 切片。
+
+    `metadata=print:file=-` 把"pts_time + lavfi.scene_score"写到 stdout，单次扫描即可
+    同时拿到切点时间与置信度；旧版 ffmpeg 会写到日志流，故 stdout 无命中时再读 stderr。
+    """
     import re
-    times = [float(m) for m in re.findall(r"pts_time:([\d.]+)", out)]
-    duration = await _get_duration(abs_path)
-    if times:
-        boundaries = [0.0] + times + [duration]
-        for i in range(len(boundaries) - 1):
-            if boundaries[i + 1] - boundaries[i] >= 0.5:  # 忽略过短镜头
-                shots.append({"start": boundaries[i], "end": boundaries[i + 1]})
-    if not shots:
-        shots = [{"start": 0.0, "end": duration}]
+    threshold = settings.video_shot_threshold
+    code, out, err = await _run([
+        "ffmpeg", "-v", "quiet", "-i", abs_path, "-vf",
+        f"select='gt(scene,{threshold})',metadata=print:file=-",
+        "-f", "null", "-"], timeout=1800)
+
+    blob = out or ""
+    if "pts_time" not in blob:
+        blob = err or ""
+    if "pts_time" not in blob:
+        logger.warning(f"ffmpeg scene detection produced no output (code={code})")
+        return []
+
+    # 逐行解析：frame 行给出 pts_time，紧跟的 metadata 行给出 scene_score
+    marks: List[tuple] = []
+    pending_time: Optional[float] = None
+    for line in blob.splitlines():
+        m_t = re.search(r"pts_time:([\d.]+)", line)
+        if m_t:
+            pending_time = float(m_t.group(1))
+            continue
+        m_s = re.search(r"lavfi\.scene_score=([\d.]+)", line)
+        if m_s and pending_time is not None:
+            marks.append((pending_time, float(m_s.group(1))))
+            pending_time = None
+
+    if not marks:
+        return []
+
+    # 去重 + 过滤越界/边界切点
+    seen, boundaries = set(), []
+    for t, score in sorted(marks, key=lambda x: x[0]):
+        key = round(t, 3)
+        if key in seen or t <= 0.01 or t >= duration - 0.01:
+            continue
+        seen.add(key)
+        boundaries.append((t, score))
+
+    if not boundaries:
+        return []
+
+    edges = [0.0] + [t for t, _ in boundaries] + [duration]
+    shots = []
+    for i in range(len(edges) - 1):
+        score = 0.0 if i == 0 else boundaries[i - 1][1]
+        shots.append({"start": edges[i], "end": edges[i + 1], "score": score})
     return shots
+
+
+def _uniform_shots(duration: float, target_seconds: float = 10.0) -> List[Dict[str, float]]:
+    """等间隔兜底切片（无场景变化时至少给出可用粒度）。"""
+    import math
+    n = max(1, min(settings.video_max_shots, math.ceil(duration / target_seconds)))
+    step = duration / n
+    return [{"start": round(i * step, 3),
+             "end": round(duration if i == n - 1 else (i + 1) * step, 3),
+             "score": 0.0} for i in range(n)]
+
+
+def _postprocess_shots(shots: List[Dict[str, float]], duration: float) -> List[Dict[str, float]]:
+    """后处理：去重 → 合并过短镜头 → 按场景分数限幅 → 重新编号。"""
+    min_dur = max(0.1, settings.video_min_shot_seconds)
+    max_shots = max(1, settings.video_max_shots)
+
+    cleaned: List[Dict[str, float]] = []
+    for s in shots:
+        start, end = float(s.get("start", 0.0)), float(s.get("end", 0.0))
+        if end <= start:
+            continue
+        cleaned.append({"start": start, "end": end, "score": float(s.get("score", 0.0))})
+    cleaned.sort(key=lambda x: x["start"])
+
+    if not cleaned:
+        return [{"start": 0.0, "end": duration, "score": 0.0}]
+
+    # 1. 合并过短镜头到前一个（首尾镜头单独处理，避免把片头/片尾吞掉）
+    merged: List[Dict[str, float]] = [cleaned[0]]
+    for s in cleaned[1:]:
+        if s["end"] - s["start"] < min_dur and merged:
+            merged[-1]["end"] = s["end"]
+        else:
+            merged.append(s)
+    # 首段过短则并入第二段
+    if len(merged) > 1 and merged[0]["end"] - merged[0]["start"] < min_dur:
+        merged[1]["start"] = merged[0]["start"]
+        merged.pop(0)
+
+    # 2. 超过上限：按场景分数保留最显著的边界（首镜头必留）
+    if len(merged) > max_shots:
+        scored = sorted(range(1, len(merged)),
+                        key=lambda i: merged[i]["score"], reverse=True)[:max_shots - 1]
+        keep = sorted([0] + scored)
+        merged = [merged[i] for i in keep]
+        # 保留边界后重新闭合区间，消除空隙
+        for i in range(len(merged) - 1):
+            merged[i + 1]["start"] = merged[i]["end"]
+        merged[-1]["end"] = max(merged[-1]["end"], duration)
+
+    merged[0]["start"] = 0.0
+    merged[-1]["end"] = round(max(merged[-1]["end"], duration), 3)
+    return merged
 
 
 async def _get_duration(abs_path: str) -> float:
@@ -209,7 +372,10 @@ async def process(db: AsyncSession, asset_id: int) -> Dict[str, Any]:
 
     # 3. 镜头检测 + 关键帧
     shots = await detect_shots(abs_path)
-    logger.info(f"Video asset {asset_id}: {len(shots)} shots detected")
+    logger.info(f"Video asset {asset_id}: {len(shots)} shots detected "
+                f"(duration={video_meta.get('duration')}s, "
+                f"threshold={settings.video_shot_threshold}, "
+                f"min={settings.video_min_shot_seconds}s, max={settings.video_max_shots})")
 
     # 4. 重建知识单元（清除旧 units）
     await knowledge_unit_repo.delete_units_by_asset(db, asset_id)
@@ -226,7 +392,8 @@ async def process(db: AsyncSession, asset_id: int) -> Dict[str, Any]:
         await knowledge_unit_repo.create_video_shot(
             db, unit_id=unit.id, asset_id=aid, shot_index=i,
             start_time=shot["start"], end_time=shot["end"],
-            duration=shot["end"] - shot["start"])
+            duration=shot["end"] - shot["start"],
+            shot_metadata={"scene_score": round(shot.get("score", 0.0), 4)})
 
         # 抽关键帧
         kf_rel = await extract_keyframe(asset, abs_path, shot, i)
@@ -256,6 +423,7 @@ async def process(db: AsyncSession, asset_id: int) -> Dict[str, Any]:
         "analysis_errors": analysis_errors,
         "duration": video_meta.get("duration"),
         "has_preview": bool(preview_rel),
+        "shot_ranges": [[round(s["start"], 2), round(s["end"], 2)] for s in shots],
     }
 
 

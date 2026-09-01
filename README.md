@@ -262,8 +262,12 @@ ai-agent-platform/
 上传素材 → Redis 任务队列 → Worker 异步处理 → AI 自动分析打标 → 人工审核 → 向量索引 → 三种模式检索
 ```
 
-- **视频处理链路**：ffmpeg 抽帧 → PySceneDetect 镜头检测（异常自动降级 ffmpeg scene filter）→ 关键帧提取 → Vision 模型逐镜头分析 → 720p 预览生成
+- **视频处理链路**：ffmpeg 抽帧 → 镜头检测（ffmpeg scene filter 主路径，可选 PySceneDetect）→ 关键帧提取 → Vision 模型逐镜头分析 → 720p 预览生成
+  - 切片参数可调：`video_shot_threshold`（场景分数阈值，默认 0.3）、`video_min_shot_seconds`（最短镜头，默认 1.5s）、`video_max_shots`（单视频镜头上限，默认 40，控制 VL 调用成本）
+  - 素材详情页提供**镜头时间轴**：关键帧缩略图条 + 起始时间，点击跳转播放，播放时高亮当前镜头
+  - ffmpeg/ffprobe 自动解析绝对路径（`shutil.which` + 常见目录兜底），不受 launchd / systemd 精简 PATH 影响
 - **AI 分析**：Token Plan 内视觉模型（qwen3.7-plus）生成内容描述 + AI 标签，进入 `review_required` 待审核状态
+- **任务失败自愈**：任务重试耗尽时自动回退素材状态（分析失败 → `failed`，索引失败 → 退回 `review_required`），Worker 启动时还会扫描回收被 kill 遗留的中间态素材，避免素材永久锁在"处理中"
 - **向量化索引**：文本 → text-embedding-v4；图片 → 通义多模态 embedding（额度耗尽时自动降级 VL 描述 + 文本向量），1024 维存入 pgvector
 - **文档类素材（PDF / TXT / Markdown / Word）**：pypdf / python-docx 提取文本 → 按页/分块生成检索单元 → LLM 生成整体摘要与标签 → 文本 Embedding 入库（扫描件无文本层时报错提示需 OCR）
 - **音频素材**：DashScope ASR（paraformer）转写 → 按语义分段（15-30s/段）→ 转写文本 Embedding；ASR 不可用时自动降级为按时长切分的元数据分段，仍可按文件名/时间段检索
