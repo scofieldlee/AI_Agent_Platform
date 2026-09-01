@@ -100,6 +100,15 @@ class Settings(BaseSettings):
     # --- Logging ---
     log_level: str = "INFO"
 
+    # --- Audit / 操作日志 ---
+    audit_enabled: bool = True                      # 总开关
+    audit_store_request_body: bool = True          # 是否存请求体（强制脱敏）
+    audit_retention_days: int = 180                # 默认保留天数（清理脚本使用）
+    audit_get_whitelist: str = (                   # GET 请求也记录的路径（逗号分隔，前缀匹配）
+        "/api/v1/auth/users,/api/v1/auth/roles,/api/v1/auth/permissions,"
+        "/api/v1/monitoring/,/api/v1/multimodal/assets/"
+    )
+
     @property
     def cors_origin_list(self) -> List[str]:
         """Parse CORS origins from comma-separated string."""

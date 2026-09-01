@@ -52,6 +52,9 @@ PERMISSION_CATALOG = [
     # Analytics
     ("analytics:view", "View Analytics", "analytics", "view", "View execution traces and stats"),
 
+    # Audit Logs (operation logs)
+    ("audit:view", "View Audit Logs", "audit", "view", "View system operation / audit logs"),
+
     # Users & Permissions (admin only)
     ("user:view", "View Users", "user", "view", "View user list"),
     ("user:manage", "Manage Users", "user", "manage", "Create, update, disable users"),
@@ -71,6 +74,7 @@ ROLE_PERMISSIONS = {
         "tool:view", "tool:manage",
         "model:view", "model:manage",
         "analytics:view",
+        "audit:view",
         "conversation:view",
         "ticket:view", "ticket:manage",
         "memory:view", "memory:manage",
@@ -80,6 +84,7 @@ ROLE_PERMISSIONS = {
         "conversation:view", "conversation:manage",
         "ticket:view", "ticket:manage",
         "analytics:view",
+        "audit:view",
         "memory:view",
     ],
     "developer": [

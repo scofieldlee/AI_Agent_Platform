@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database.session import get_db
 from app.auth.dependencies import require_permission
 from app.core.timeutils import local_iso
+from app.core.audit import audit
 from app.schemas.knowledge import (
     ChunkResponse, ChunkUpdate, DocumentContentUpdate, DocumentDetailResponse,
     DocumentResponse, DocumentUpdate, ExcelImportResponse, KnowledgeBaseCreate,
@@ -131,6 +132,8 @@ async def list_knowledge_bases_endpoint(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("", response_model=KnowledgeBaseResponse, status_code=201)
+@audit(action="create", resource_type="knowledge",
+       resource_name=lambda ctx: getattr(ctx.get("data"), "name", None))
 async def create_knowledge_base_endpoint(data: KnowledgeBaseCreate, db: AsyncSession = Depends(get_db)):
     """Create a new knowledge base.
 
@@ -345,6 +348,12 @@ async def update_document_endpoint(
     "/{kb_id}/documents/{doc_id}", status_code=204,
     dependencies=[Depends(require_permission("knowledge:manage"))],
 )
+@audit(
+    action="delete",
+    resource_type="document",
+    get_resource=lambda db, kb_id, doc_id: get_document(db, kb_id, doc_id),
+    resource_name_attr="title",
+)
 async def delete_document_endpoint(
     kb_id: int, doc_id: int, db: AsyncSession = Depends(get_db)
 ):
@@ -403,6 +412,11 @@ async def update_chunk_endpoint(
 @router.delete(
     "/{kb_id}/documents/{doc_id}/chunks/{chunk_id}", status_code=204,
     dependencies=[Depends(require_permission("knowledge:manage"))],
+)
+@audit(
+    action="delete",
+    resource_type="chunk",
+    get_resource=lambda db, kb_id, doc_id, chunk_id: get_chunk(db, chunk_id),
 )
 async def delete_chunk_endpoint(
     kb_id: int, doc_id: int, chunk_id: int, db: AsyncSession = Depends(get_db)

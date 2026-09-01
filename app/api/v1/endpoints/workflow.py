@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from app.database.session import get_db
 from app.auth.dependencies import require_permission
 from app.core.timeutils import local_iso
+from app.core.audit import audit
 from app.repositories.analytics_repo import get_trace, get_spans, list_traces
 from app.repositories import workflow_repo
 from app.schemas import workflow as wf_schemas
@@ -96,6 +97,8 @@ async def list_workflows(db: AsyncSession = Depends(get_db)):
 
 @router.post("", response_model=wf_schemas.WorkflowDetail, status_code=201,
              dependencies=[Depends(require_permission("agent:manage"))])
+@audit(action="create", resource_type="workflow",
+       resource_name=lambda ctx: getattr(ctx.get("payload"), "name", None))
 async def create_workflow(
     payload: wf_schemas.WorkflowCreate,
     db: AsyncSession = Depends(get_db),
@@ -214,6 +217,18 @@ async def get_workflow(workflow_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.put("/{workflow_id}", response_model=wf_schemas.WorkflowDetail,
             dependencies=[Depends(require_permission("agent:manage"))])
+@audit(
+    action="update",
+    resource_type="workflow",
+    get_resource=lambda db, workflow_id: workflow_repo.get_workflow(db, workflow_id),
+    resource_name_attr="name",
+    capture_changes=True,
+    diff_before=lambda source: {"name": source.name, "description": source.description},
+    diff_after=lambda result: {
+        "name": getattr(result, "name", None),
+        "description": getattr(result, "description", None),
+    },
+)
 async def update_workflow(
     workflow_id: int,
     payload: wf_schemas.WorkflowUpdate,
@@ -235,6 +250,12 @@ async def update_workflow(
 
 @router.delete("/{workflow_id}", status_code=204,
                dependencies=[Depends(require_permission("agent:manage"))])
+@audit(
+    action="delete",
+    resource_type="workflow",
+    get_resource=lambda db, workflow_id: workflow_repo.get_workflow(db, workflow_id),
+    resource_name_attr="name",
+)
 async def delete_workflow(workflow_id: int, db: AsyncSession = Depends(get_db)):
     """Delete a workflow. Refuses when agents are bound to it."""
     wf = await workflow_repo.get_workflow(db, workflow_id)
@@ -254,6 +275,12 @@ async def delete_workflow(workflow_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.post("/{workflow_id}/publish", response_model=wf_schemas.WorkflowDetail,
              dependencies=[Depends(require_permission("agent:manage"))])
+@audit(
+    action="publish",
+    resource_type="workflow",
+    get_resource=lambda db, workflow_id: workflow_repo.get_workflow(db, workflow_id),
+    resource_name_attr="name",
+)
 async def publish_workflow(workflow_id: int, db: AsyncSession = Depends(get_db)):
     """Publish a workflow so it becomes the runtime default."""
     wf = await workflow_repo.get_workflow(db, workflow_id)

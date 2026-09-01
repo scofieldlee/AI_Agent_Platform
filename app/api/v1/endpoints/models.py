@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
 from app.auth.dependencies import require_permission
+from app.core.audit import audit
 from app.schemas.model import (
     ModelProviderCreate,
     ModelProviderUpdate,
@@ -34,6 +35,8 @@ async def list_providers_endpoint(
 
 
 @router.post("/providers", response_model=ModelProviderResponse, status_code=201, dependencies=[Depends(require_permission("model:manage"))])
+@audit(action="create", resource_type="provider",
+       resource_name=lambda ctx: getattr(ctx.get("data"), "code", None))
 async def create_provider_endpoint(
     data: ModelProviderCreate,
     db: AsyncSession = Depends(get_db),
@@ -66,6 +69,12 @@ async def get_provider_endpoint(provider_id: int, db: AsyncSession = Depends(get
 
 
 @router.patch("/providers/{provider_id}", response_model=ModelProviderResponse, dependencies=[Depends(require_permission("model:manage"))])
+@audit(
+    action="update",
+    resource_type="provider",
+    get_resource=lambda db, provider_id: model_repo.get_provider(db, provider_id),
+    resource_name_attr="code",
+)
 async def update_provider_endpoint(
     provider_id: int,
     data: ModelProviderUpdate,
@@ -84,6 +93,12 @@ async def update_provider_endpoint(
 
 
 @router.delete("/providers/{provider_id}", dependencies=[Depends(require_permission("model:manage"))])
+@audit(
+    action="delete",
+    resource_type="provider",
+    get_resource=lambda db, provider_id: model_repo.get_provider(db, provider_id),
+    resource_name_attr="code",
+)
 async def delete_provider_endpoint(provider_id: int, db: AsyncSession = Depends(get_db)):
     """Delete a provider."""
     provider = await model_repo.get_provider(db, provider_id)
@@ -132,6 +147,8 @@ async def list_model_configs_endpoint(
 
 
 @router.post("/configs", response_model=ModelConfigResponse, status_code=201, dependencies=[Depends(require_permission("model:manage"))])
+@audit(action="create", resource_type="model_config",
+       resource_name=lambda ctx: getattr(ctx.get("data"), "name", None))
 async def create_model_config_endpoint(
     data: ModelConfigCreate,
     db: AsyncSession = Depends(get_db),
@@ -159,6 +176,12 @@ async def get_model_config_endpoint(config_id: int, db: AsyncSession = Depends(g
 
 
 @router.patch("/configs/{config_id}", response_model=ModelConfigResponse, dependencies=[Depends(require_permission("model:manage"))])
+@audit(
+    action="update",
+    resource_type="model_config",
+    get_resource=lambda db, config_id: model_repo.get_model_config(db, config_id),
+    resource_name_attr="name",
+)
 async def update_model_config_endpoint(
     config_id: int,
     data: ModelConfigUpdate,
@@ -185,6 +208,12 @@ async def update_model_config_endpoint(
 
 
 @router.delete("/configs/{config_id}", dependencies=[Depends(require_permission("model:manage"))])
+@audit(
+    action="delete",
+    resource_type="model_config",
+    get_resource=lambda db, config_id: model_repo.get_model_config(db, config_id),
+    resource_name_attr="name",
+)
 async def delete_model_config_endpoint(config_id: int, db: AsyncSession = Depends(get_db)):
     """Delete a model configuration."""
     config = await model_repo.get_model_config(db, config_id)
@@ -197,6 +226,12 @@ async def delete_model_config_endpoint(config_id: int, db: AsyncSession = Depend
 
 
 @router.post("/configs/{config_id}/set-default", response_model=ModelConfigResponse, dependencies=[Depends(require_permission("model:manage"))])
+@audit(
+    action="set_default",
+    resource_type="model_config",
+    get_resource=lambda db, config_id: model_repo.get_model_config(db, config_id),
+    resource_name_attr="name",
+)
 async def set_default_model_config_endpoint(
     config_id: int,
     db: AsyncSession = Depends(get_db),

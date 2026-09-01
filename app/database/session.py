@@ -43,7 +43,7 @@ async def get_db() -> AsyncSession:
 async def init_db():
     """Initialize database (create tables if needed)."""
     # Import all models so they are registered with Base.metadata
-    from app.models import user, agent, workflow, knowledge, conversation, memory, tool, model_config, analytics, human_task, ai_employee  # noqa
+    from app.models import user, agent, workflow, knowledge, conversation, memory, tool, model_config, analytics, human_task, ai_employee, audit_log  # noqa
     from app.multimodal import models as multimodal_models  # noqa: F401 (mm_ 前缀表)
 
     from app.database.base import Base

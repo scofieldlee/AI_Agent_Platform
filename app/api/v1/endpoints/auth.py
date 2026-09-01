@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
 from app.core.timeutils import local_iso
+from app.core.audit import audit
 from app.models.user import User, UserRole, Role, RolePermission, Permission
 from app.auth.service import (
     hash_password, verify_password,
@@ -47,6 +48,13 @@ def _user_to_out(user: User, roles: list[str], permissions: list[str]) -> dict:
 
 
 @router.post("/login", response_model=TokenResponse, summary="Login")
+@audit(
+    action="login",
+    resource_type="user",
+    username=lambda ctx: getattr(ctx.get("body"), "username", None),
+    resource_name=lambda ctx: getattr(ctx.get("body"), "username", None),
+    summary=lambda ctx: f"用户 {getattr(ctx.get('body'), 'username', '')} 登录系统",
+)
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     """Authenticate and return JWT tokens."""
     user, error = await authenticate_user(db, body.username, body.password)
@@ -72,6 +80,12 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/register", response_model=UserOut, summary="Register a new user")
+@audit(
+    action="create",
+    resource_type="user",
+    resource_name=lambda ctx: getattr(ctx.get("body"), "username", None),
+    username=lambda ctx: getattr(ctx.get("body"), "username", None),
+)
 async def register(
     body: RegisterRequest,
     db: AsyncSession = Depends(get_db),
@@ -157,6 +171,12 @@ async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)
 
 
 @router.post("/logout", summary="Logout")
+@audit(
+    action="logout",
+    resource_type="user",
+    resource_id=lambda ctx: ctx.get("current_user").id if ctx.get("current_user") else None,
+    resource_name=lambda ctx: ctx.get("current_user").username if ctx.get("current_user") else None,
+)
 async def logout(current_user: User = Depends(get_current_user)):
     """
     Stateless logout — client discards tokens.
@@ -235,6 +255,11 @@ async def list_roles(
 
 
 @router.post("/users", response_model=UserOut, summary="Create user (admin)")
+@audit(
+    action="create",
+    resource_type="user",
+    resource_name=lambda ctx: getattr(ctx.get("body"), "username", None),
+)
 async def create_user(
     body: UserCreateRequest,
     current_user: User = Depends(get_current_user),
@@ -288,6 +313,29 @@ async def create_user(
 
 
 @router.patch("/users/{user_id}", response_model=UserOut, summary="Update user (admin)")
+@audit(
+    action="update",
+    resource_type="user",
+    get_resource=lambda db, user_id: db.get(User, user_id),
+    resource_name_attr="username",
+    capture_changes=True,
+    diff_before=lambda source: {
+        "full_name": source.full_name,
+        "department": source.department,
+        "phone": source.phone,
+        "is_active": source.is_active,
+        "is_superuser": source.is_superuser,
+        "roles": [r.code for r in source.roles],
+    },
+    diff_after=lambda result: {
+        "full_name": result.get("full_name"),
+        "department": result.get("department"),
+        "phone": result.get("phone"),
+        "is_active": result.get("is_active"),
+        "is_superuser": result.get("is_superuser"),
+        "roles": result.get("roles"),
+    },
+)
 async def update_user(
     user_id: int,
     body: UserUpdateRequest,
@@ -410,6 +458,11 @@ async def get_role_permission_codes(db: AsyncSession, role_id: int) -> list[str]
     return [row[0] for row in result.fetchall()]
 
 
+def _role_perm_codes(role: Role) -> list[str]:
+    """从已加载的 Role.permissions 关系取权限码（供审计 diff 使用）。"""
+    return [p.code for p in (role.permissions or [])]
+
+
 async def set_role_permissions(db: AsyncSession, role_id: int, permission_codes: list[str]) -> None:
     """Replace role's permissions."""
     # Validate permission codes
@@ -435,6 +488,13 @@ async def set_role_permissions(db: AsyncSession, role_id: int, permission_codes:
 
 
 @router.post("/roles", response_model=RoleDetailOut, summary="Create role")
+@audit(
+    action="create",
+    resource_type="role",
+    resource_name=lambda ctx: getattr(ctx.get("body"), "code", None),
+    capture_changes=True,
+    diff_after=lambda result: {"permissions": result.get("permissions")},
+)
 async def create_role(
     body: RoleCreateRequest,
     current_user: User = Depends(get_current_user),
@@ -474,6 +534,23 @@ async def create_role(
 
 
 @router.patch("/roles/{role_id}", response_model=RoleDetailOut, summary="Update role")
+@audit(
+    action="update",
+    resource_type="role",
+    get_resource=lambda db, role_id: db.get(Role, role_id),
+    resource_name_attr="code",
+    capture_changes=True,
+    diff_before=lambda source: {
+        "name": source.name,
+        "description": source.description,
+        "permissions": sorted(_role_perm_codes(source)),
+    },
+    diff_after=lambda result: {
+        "name": result.get("name"),
+        "description": result.get("description"),
+        "permissions": result.get("permissions"),
+    },
+)
 async def update_role(
     role_id: int,
     body: RoleUpdateRequest,
@@ -525,6 +602,12 @@ async def update_role(
 
 
 @router.delete("/roles/{role_id}", summary="Delete role")
+@audit(
+    action="delete",
+    resource_type="role",
+    get_resource=lambda db, role_id: db.get(Role, role_id),
+    resource_name_attr="code",
+)
 async def delete_role(
     role_id: int,
     current_user: User = Depends(get_current_user),

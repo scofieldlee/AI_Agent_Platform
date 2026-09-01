@@ -15,6 +15,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.timeutils import ensure_process_timezone
 from app.core.timezone_middleware import LocalTimezoneMiddleware
+from app.core.audit_middleware import AuditMiddleware
 from app.database.session import engine, init_db
 from app.database.redis_client import redis_client, close_redis
 
@@ -171,12 +172,16 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # 审计中间件：在 CORS 之后、时区中间件之前注册。
+    # Starlette 后添加的中间件在外层，因此执行顺序为：时区 → 审计 → CORS → 应用。
+    app.add_middleware(AuditMiddleware)
+
     # 时间统一为系统时区（默认北京时间）：把响应里的 UTC 时间换算成本地时间
     # 放在 CORS 之后添加 → 处于最外层，改写的是最终响应。
     app.add_middleware(LocalTimezoneMiddleware)
 
     # --- Routes ---
-    from app.api.v1.endpoints import health, agents, conversations, knowledge, tools, analytics, memories, human_tasks, auth, workflow, monitoring, public, models, ai_employees
+    from app.api.v1.endpoints import health, agents, conversations, knowledge, tools, analytics, memories, human_tasks, auth, workflow, monitoring, public, models, ai_employees, audit
     from app.multimodal.api import endpoints as multimodal
 
     app.include_router(health.router, prefix="/api/v1", tags=["health"])
@@ -194,6 +199,7 @@ def create_app() -> FastAPI:
     app.include_router(public.router, prefix="/api/v1/public", tags=["public"])
     app.include_router(ai_employees.router, prefix="/api/v1/ai-employees", tags=["ai-employees"])
     app.include_router(multimodal.router, prefix="/api/v1/multimodal", tags=["multimodal"])
+    app.include_router(audit.router, prefix="/api/v1", tags=["audit"])
 
     # --- Static files ---
     static_dir = Path(__file__).parent.parent / "static"

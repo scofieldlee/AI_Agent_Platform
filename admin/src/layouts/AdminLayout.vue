@@ -71,6 +71,10 @@
           <MonitorOutlined />
           <span>系统监控</span>
         </a-menu-item>
+        <a-menu-item v-if="canSee('audit-logs')" key="audit-logs">
+          <FileSearchOutlined />
+          <span>操作日志</span>
+        </a-menu-item>
         <a-sub-menu v-if="canSee('multimodal/kbs')" key="multimodal">
           <template #title>
             <PictureOutlined />
@@ -174,6 +178,7 @@ import {
   LogoutOutlined,
   ApartmentOutlined,
   MonitorOutlined,
+  FileSearchOutlined,
   DatabaseOutlined,
   SafetyOutlined,
   PictureOutlined,
@@ -249,6 +254,7 @@ const menuPermissions: Record<string, string> = {
   users: 'user:view',
   roles: 'user:manage',
   monitoring: 'system:config',
+  'audit-logs': 'audit:view',
   'multimodal/kbs': 'multimodal:view',
   'multimodal/assets': 'multimodal:view',
   'multimodal/tasks': 'multimodal:view',
@@ -300,6 +306,7 @@ const currentTitle = computed(() => {
     Users: '用户管理',
     Roles: '角色权限',
     Monitoring: '系统监控',
+    AuditLogs: '操作日志',
     MultimodalKB: '多模态知识库',
     MultimodalAssets: '多模态素材库',
     MultimodalUpload: '素材上传',

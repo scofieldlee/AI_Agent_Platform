@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_permission, get_current_user
 from app.database.session import get_db
+from app.core.audit import audit
 from app.multimodal.schemas import (
     MultimodalKBCreate, MultimodalKBUpdate, MultimodalKBResponse,
     MultimodalKBDetailResponse, KBStatsResponse,
@@ -45,6 +46,8 @@ ManagePerm = Depends(require_permission("multimodal:manage"))
 
 @router.post("/knowledge-bases", response_model=MultimodalKBResponse,
              status_code=201, dependencies=[ManagePerm])
+@audit(action="create", resource_type="knowledge_base",
+       resource_name=lambda ctx: getattr(ctx.get("data"), "name", None))
 async def create_kb(data: MultimodalKBCreate,
                     db: AsyncSession = Depends(get_db),
                     current_user=Depends(get_current_user)):
@@ -99,6 +102,12 @@ async def get_kb_stats(kb_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.put("/knowledge-bases/{kb_id}", response_model=MultimodalKBResponse,
             dependencies=[ManagePerm])
+@audit(
+    action="update",
+    resource_type="knowledge_base",
+    get_resource=lambda db, kb_id: knowledge_base_repo.get_kb(db, kb_id),
+    resource_name_attr="name",
+)
 async def update_kb(kb_id: int, data: MultimodalKBUpdate,
                     db: AsyncSession = Depends(get_db)):
     """更新知识库配置。"""
@@ -112,6 +121,12 @@ async def update_kb(kb_id: int, data: MultimodalKBUpdate,
 
 
 @router.delete("/knowledge-bases/{kb_id}", dependencies=[ManagePerm])
+@audit(
+    action="delete",
+    resource_type="knowledge_base",
+    get_resource=lambda db, kb_id: knowledge_base_repo.get_kb(db, kb_id),
+    resource_name_attr="name",
+)
 async def delete_kb(kb_id: int, db: AsyncSession = Depends(get_db)):
     """删除知识库（需无素材，含回收站）。"""
     kb = await knowledge_base_repo.get_kb(db, kb_id)
@@ -195,6 +210,12 @@ async def get_asset(asset_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.put("/assets/{asset_id}", response_model=AssetDetailResponse,
             dependencies=[ManagePerm])
+@audit(
+    action="update",
+    resource_type="asset",
+    get_resource=lambda db, asset_id: asset_repo.get_asset(db, asset_id),
+    resource_name_attr="name",
+)
 async def update_asset(asset_id: int, data: AssetUpdate,
                        db: AsyncSession = Depends(get_db)):
     """编辑素材（名称 / attributes）。"""
@@ -210,6 +231,12 @@ async def update_asset(asset_id: int, data: AssetUpdate,
 
 
 @router.delete("/assets/{asset_id}", dependencies=[ManagePerm])
+@audit(
+    action="delete",
+    resource_type="asset",
+    get_resource=lambda db, asset_id: asset_repo.get_asset(db, asset_id),
+    resource_name_attr="name",
+)
 async def soft_delete_asset(asset_id: int, db: AsyncSession = Depends(get_db)):
     """软删除素材 → 回收站。"""
     asset = await asset_service.soft_delete_asset(db, asset_id)
@@ -220,6 +247,12 @@ async def soft_delete_asset(asset_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/assets/{asset_id}/restore", dependencies=[ManagePerm])
+@audit(
+    action="restore",
+    resource_type="asset",
+    get_resource=lambda db, asset_id: asset_repo.get_asset(db, asset_id),
+    resource_name_attr="name",
+)
 async def restore_asset(asset_id: int, db: AsyncSession = Depends(get_db)):
     """从回收站恢复。"""
     asset = await asset_service.restore_asset(db, asset_id)
@@ -230,6 +263,12 @@ async def restore_asset(asset_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/assets/{asset_id}/permanent", dependencies=[ManagePerm])
+@audit(
+    action="delete",
+    resource_type="asset",
+    get_resource=lambda db, asset_id: asset_repo.get_asset(db, asset_id),
+    resource_name_attr="name",
+)
 async def permanent_delete_asset(asset_id: int, db: AsyncSession = Depends(get_db)):
     """永久删除（DB 记录 + 向量索引 + 文件目录）。"""
     result = await asset_service.permanent_delete_asset(db, asset_id)
@@ -319,6 +358,7 @@ async def batch_analyze(data: BatchAnalyzeRequest, db: AsyncSession = Depends(ge
 
 
 @router.post("/assets/batch-approve", dependencies=[ManagePerm])
+@audit(action="approve", resource_type="asset", summary="批量审核通过素材")
 async def batch_approve(data: BatchAnalyzeRequest,
                         db: AsyncSession = Depends(get_db),
                         current_user=Depends(get_current_user)):
@@ -385,6 +425,7 @@ async def list_tasks(kb_id: Optional[int] = None,
 
 @router.delete("/tasks/{task_id}", response_model=TaskDeleteResponse,
                dependencies=[ManagePerm])
+@audit(action="delete", resource_type="task", resource_id=lambda ctx: str(ctx.get("task_id")))
 async def delete_task(task_id: int, db: AsyncSession = Depends(get_db)):
     """删除单个处理任务。若状态为 pending，会先从 Redis 队列中踢出。"""
     task = await processing_repo.get_task(db, task_id)
@@ -439,6 +480,12 @@ async def batch_delete_tasks(data: BatchDeleteTasksRequest,
 # ============================================================
 
 @router.post("/assets/{asset_id}/approve", dependencies=[ManagePerm])
+@audit(
+    action="approve",
+    resource_type="asset",
+    get_resource=lambda db, asset_id: asset_repo.get_asset(db, asset_id),
+    resource_name_attr="name",
+)
 async def approve_asset(asset_id: int, data: ApproveRequest,
                         db: AsyncSession = Depends(get_db),
                         current_user=Depends(get_current_user)):

@@ -24,6 +24,7 @@ from app.models.tool import Tool, ToolExecution
 from app.models.model_config import (
     ModelProvider, ModelConfig, ModelUsageLog,
 )
+from app.models.audit_log import AuditLog
 
 __all__ = [
     # User
@@ -44,4 +45,6 @@ __all__ = [
     "Tool", "ToolExecution",
     # Model
     "ModelProvider", "ModelConfig", "ModelUsageLog",
+    # Audit
+    "AuditLog",
 ]

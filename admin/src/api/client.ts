@@ -264,6 +264,19 @@ export const employeeApi = {
     client.post(`/ai-employees/tasks/${taskId}/resume`, data)
 }
 
+// ===== Audit Logs (操作日志) =====
+export const auditApi = {
+  list: (params?: {
+    page?: number; page_size?: number; keyword?: string;
+    action?: string; resource_type?: string; username?: string;
+    success?: boolean; request_id?: string;
+    start_time?: string; end_time?: string;
+  }) => client.get('/audit-logs', { params }),
+  detail: (id: number) => client.get(`/audit-logs/${id}`),
+  byRequestId: (requestId: string) => client.get(`/audit-logs/by-request/${requestId}`),
+  stats: (days?: number) => client.get('/audit-logs/stats/summary', { params: { days } })
+}
+
 // ===== Monitoring =====
 export const monitoringApi = {
   overview: () => client.get('/monitoring/overview'),

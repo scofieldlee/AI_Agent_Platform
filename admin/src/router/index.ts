@@ -98,6 +98,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '系统监控', icon: 'MonitorOutlined', permission: 'system:config' }
       },
       {
+        path: 'audit-logs',
+        name: 'AuditLogs',
+        component: () => import('@/views/AuditLogs.vue'),
+        meta: { title: '操作日志', icon: 'FileSearchOutlined', permission: 'audit:view' }
+      },
+      {
         path: 'multimodal/kbs',
         name: 'MultimodalKB',
         component: () => import('@/views/multimodal/MultimodalKB.vue'),

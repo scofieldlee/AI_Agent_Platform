@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
 from app.auth.dependencies import require_permission
+from app.core.audit import audit
 from app.schemas.agent import (
     AgentCreate, AgentUpdate, AgentResponse, AgentDetailResponse,
     ToolBindingRequest, KnowledgeBindingRequest, WorkflowBindingRequest,
@@ -26,6 +27,7 @@ async def list_agents_endpoint(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("", response_model=AgentResponse, status_code=201, dependencies=[Depends(require_permission("agent:manage"))])
+@audit(action="create", resource_type="agent", resource_name=lambda ctx: getattr(ctx.get("data"), "name", None))
 async def create_agent_endpoint(data: AgentCreate, db: AsyncSession = Depends(get_db)):
     """Create a new agent."""
     agent = await create_agent(
@@ -59,6 +61,27 @@ async def get_agent_detail_endpoint(agent_id: int, db: AsyncSession = Depends(ge
 
 
 @router.patch("/{agent_id}", response_model=AgentResponse, dependencies=[Depends(require_permission("agent:manage"))])
+@audit(
+    action="update",
+    resource_type="agent",
+    get_resource=lambda db, agent_id: get_agent(db, agent_id),
+    resource_name_attr="name",
+    capture_changes=True,
+    diff_before=lambda source: {
+        "name": source.name,
+        "description": source.description,
+        "status": source.status,
+        "is_active": source.is_active,
+        "config": source.config,
+    },
+    diff_after=lambda result: {
+        "name": getattr(result, "name", None),
+        "description": getattr(result, "description", None),
+        "status": getattr(result, "status", None),
+        "is_active": getattr(result, "is_active", None),
+        "config": getattr(result, "config", None),
+    },
+)
 async def update_agent_endpoint(
     agent_id: int,
     data: AgentUpdate,
@@ -92,6 +115,12 @@ async def update_agent_endpoint(
 
 
 @router.delete("/{agent_id}", dependencies=[Depends(require_permission("agent:manage"))])
+@audit(
+    action="delete",
+    resource_type="agent",
+    get_resource=lambda db, agent_id: get_agent(db, agent_id),
+    resource_name_attr="name",
+)
 async def delete_agent_endpoint(agent_id: int, db: AsyncSession = Depends(get_db)):
     """Archive (soft-delete) an agent.
 
