@@ -74,6 +74,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '模型中心', icon: 'DatabaseOutlined', permission: 'model:view' }
       },
       {
+        path: 'tools',
+        name: 'Tools',
+        component: () => import('@/views/Tools.vue'),
+        meta: { title: '工具管理', icon: 'ToolOutlined', permission: 'tool:view' }
+      },
+      {
         path: 'workflow',
         name: 'Workflow',
         component: () => import('@/views/WorkflowEditor.vue'),

@@ -55,6 +55,10 @@
           <DatabaseOutlined />
           <span>模型中心</span>
         </a-menu-item>
+        <a-menu-item v-if="canSee('tools')" key="tools">
+          <ToolOutlined />
+          <span>工具管理</span>
+        </a-menu-item>
         <a-menu-item v-if="canSee('workflow')" key="workflow">
           <ApartmentOutlined />
           <span>工作流编排</span>
@@ -180,6 +184,7 @@ import {
   MonitorOutlined,
   FileSearchOutlined,
   DatabaseOutlined,
+  ToolOutlined,
   SafetyOutlined,
   PictureOutlined,
   AppstoreOutlined,
@@ -250,6 +255,7 @@ const menuPermissions: Record<string, string> = {
   employees: 'agent:view',
   'employee-workbench': 'agent:view',
   models: 'model:view',
+  tools: 'tool:view',
   workflow: 'agent:view',
   users: 'user:view',
   roles: 'user:manage',
@@ -302,6 +308,7 @@ const currentTitle = computed(() => {
     Employees: 'AI 员工',
     EmployeeWorkbench: '员工工作台',
     Models: '模型中心',
+    Tools: '工具管理',
     Workflow: '工作流编排',
     Users: '用户管理',
     Roles: '角色权限',

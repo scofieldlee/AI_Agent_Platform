@@ -36,6 +36,7 @@ httpx==0.28.1
 
 # --- Document Parsing (Attachments) ---
 pypdf>=4.0.0
+pymupdf>=1.24.0
 python-docx>=1.1.0
 openpyxl>=3.1.0
 Pillow>=10.0.0

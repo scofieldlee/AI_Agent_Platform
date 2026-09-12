@@ -178,7 +178,11 @@ export const agentsApi = {
 
 // ===== Tools =====
 export const toolsApi = {
-  list: () => client.get('/tools')
+  list: () => client.get('/tools'),
+  stats: () => client.get('/tools/stats'),
+  detailStats: (name: string) => client.get(`/tools/${name}/stats`),
+  execute: (name: string, parameters: Record<string, any>) =>
+    client.post(`/tools/${name}/execute`, { parameters }, { timeout: 180000 })
 }
 
 // ===== Workflow =====

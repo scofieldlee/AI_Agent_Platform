@@ -33,6 +33,7 @@ async def register_default_tools():
     from app.tools.adapters.multimodal_kb_search import MultimodalKBSearchTool
     from app.tools.adapters.image_generation import ImageGenerationTool
     from app.tools.adapters.video_generation import VideoGenerationTool
+    from app.tools.adapters.ocr_recognition import OCRRecognitionTool
     from app.database.session import async_session_factory
     from app.models.tool import Tool
     from sqlalchemy import select
@@ -48,6 +49,7 @@ async def register_default_tools():
     registry.register(MultimodalKBSearchTool())
     registry.register(ImageGenerationTool())
     registry.register(VideoGenerationTool())
+    registry.register(OCRRecognitionTool())
 
     # Ensure tools exist in database (for execution logging)
     tool_instances = [
@@ -59,6 +61,7 @@ async def register_default_tools():
         MultimodalKBSearchTool(),
         ImageGenerationTool(),
         VideoGenerationTool(),
+        OCRRecognitionTool(),
     ]
 
     default_tools = [

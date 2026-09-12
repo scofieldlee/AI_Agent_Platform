@@ -288,19 +288,28 @@
           <!-- Tool Bindings -->
           <div class="config-section">
             <div class="section-title"><ToolOutlined /> 工具绑定</div>
-            <a-checkbox-group v-model:value="formData.tool_bindings" style="width: 100%;">
-              <div v-for="tool in allTools" :key="tool.name" class="binding-item">
-                <a-checkbox :value="tool.name">
-                  <div class="binding-info">
-                    <div class="binding-name">
-                      {{ tool.name }}
-                      <a-tag :color="toolTypeColor(tool.tool_type)" style="margin-left: 4px; font-size: 11px;">{{ tool.tool_type }}</a-tag>
-                    </div>
-                    <div class="binding-desc">{{ tool.description?.substring(0, 80) }}{{ tool.description?.length > 80 ? '...' : '' }}</div>
-                  </div>
-                </a-checkbox>
-              </div>
-            </a-checkbox-group>
+            <a-select
+              v-model:value="formData.tool_bindings"
+              mode="multiple"
+              style="width: 100%;"
+              placeholder="搜索并选择要绑定的工具..."
+              option-filter-prop="label"
+              :max-tag-count="8"
+              allow-clear
+              :options="toolOptions"
+              :filter-option="filterToolOption"
+            >
+              <template #option="{ label, toolType, desc }">
+                <div style="display: flex; align-items: baseline; gap: 8px;">
+                  <span style="font-family: monospace; font-weight: 500;">{{ label }}</span>
+                  <a-tag :color="toolTypeColor(toolType)" style="font-size: 11px; line-height: 16px; margin-inline-end: 0;">{{ toolType }}</a-tag>
+                </div>
+                <div style="font-size: 12px; opacity: 0.6; white-space: normal;">{{ desc }}</div>
+              </template>
+            </a-select>
+            <div style="margin-top: 6px; font-size: 12px; opacity: 0.6;">
+              已绑定 {{ formData.tool_bindings.length }} / {{ allTools.length }} 个工具，输入关键词可按名称搜索
+            </div>
           </div>
 
           <!-- Chat UI Config -->
@@ -604,6 +613,18 @@ function typeLabel(t: string) {
 }
 function toolTypeColor(t: string) {
   return ({ internal: 'blue', business: 'green', api: 'purple', database: 'orange', mcp: 'cyan' } as any)[t] || 'default'
+}
+const toolOptions = computed(() =>
+  allTools.value.map((t: any) => ({
+    label: t.name,
+    value: t.name,
+    toolType: t.tool_type,
+    desc: t.description
+  }))
+)
+function filterToolOption(input: string, option: any) {
+  const kw = input.toLowerCase()
+  return option.label?.toLowerCase().includes(kw) || option.desc?.toLowerCase().includes(kw)
 }
 function modelTypeLabel(t: string) {
   return ({ chat: '对话', reasoning: '推理', vision: '视觉', embedding: 'Embedding', rerank: 'Rerank', speech: '语音' } as any)[t] || t
