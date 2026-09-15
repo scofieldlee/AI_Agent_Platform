@@ -26,6 +26,7 @@ Node implementation lookup is driven by ``node_type``; unknown node types are
 skipped with a warning so a misconfigured draft never crashes the runtime.
 """
 
+import functools
 import logging
 from typing import Dict, Any, List, Optional, Callable
 
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 def _node_impls() -> Dict[str, Callable]:
     from app.workflows.nodes import (
         intent_node, knowledge_node, memory_node, tool_node, llm_node, human_node,
+        condition_node, classifier_node,
     )
     return {
         "intent": intent_node,
@@ -49,7 +51,12 @@ def _node_impls() -> Dict[str, Callable]:
         "tool": tool_node,
         "llm": llm_node,
         "human": human_node,
+        "condition": condition_node,
+        "classifier": classifier_node,
     }
+
+# Node types that receive their node.config via the ``node_config`` kwarg
+CONFIG_AWARE_TYPES = {"condition", "classifier"}
 
 
 # Node type -> trace category (for span recording)
@@ -60,6 +67,8 @@ NODE_TRACE_CATEGORY = {
     "tool": "tool",
     "llm": "model",
     "human": "workflow",
+    "condition": "workflow",
+    "classifier": "model",
 }
 
 
@@ -195,6 +204,8 @@ def build_graph_from_config(
     # Add nodes
     for node_id, node in node_by_id.items():
         impl = impls[node["node_type"]]
+        if node["node_type"] in CONFIG_AWARE_TYPES:
+            impl = functools.partial(impl, node_config=node.get("config") or {})
         if tracer is not None:
             category = NODE_TRACE_CATEGORY.get(node["node_type"], "workflow")
             impl = tracer.wrap_node(node_id, impl, category)

@@ -44,6 +44,12 @@ class AgentState(TypedDict, total=False):
     transfer_reason: Optional[str]     # Reason for human transfer
     ticket_number: Optional[str]       # Human task ticket number (if transferred)
 
+    # --- Logic nodes ---
+    condition_result: bool             # condition_node evaluation result (if/else routing)
+    condition_expression: Optional[str]  # Expression the condition node evaluated
+    classification: Optional[str]      # classifier_node output label
+    classification_confidence: float   # classifier_node confidence (0.0-1.0)
+
     # --- Metadata ---
     trace_id: str                      # Trace ID for analytics
     agent_id: Optional[int]            # Agent ID

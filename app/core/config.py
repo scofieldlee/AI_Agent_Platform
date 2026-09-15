@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     vector_search_top_k: int = 20
     rerank_top_k: int = 5
     knowledge_confidence_threshold: float = 0.75
+    knowledge_query_translation: bool = True  # 非中文查询自动翻译后双语检索
+    knowledge_translation_timeout: float = 6.0  # 翻译超时（秒），失败降级原查询
 
     # --- CORS ---
     cors_origins: str = "http://localhost:5173,http://localhost:3000"

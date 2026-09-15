@@ -214,8 +214,8 @@
                 size="small"
               />
               <div style="font-size: 11px; opacity: 0.6; margin-top: 6px; line-height: 1.5;">
-                可用字段: intent, confidence, need_human, answer, knowledge_context, tool_results 等<br />
-                支持运算符: &gt;=, &lt;, ==, && (且), || (或), ! (非)
+                可用字段: intent, confidence, need_human, condition_result, classification, answer, knowledge_context, tool_results, user_input 等<br />
+                支持运算符: &gt;=, &lt;, ==, && (且), || (或), ! (非), in (包含)
               </div>
             </div>
 
@@ -260,6 +260,45 @@
                 size="small"
                 @change="markDirty"
               />
+            </div>
+
+            <!-- 条件判断节点：条件表达式 -->
+            <div class="detail-section" v-if="selectedNode.nodeType === 'condition'">
+              <div class="detail-label">条件表达式（结果写入 condition_result）</div>
+              <a-input
+                v-model:value="selectedNode.config.expression"
+                size="small"
+                placeholder="例如: confidence >= 0.5"
+                @change="markDirty"
+              />
+              <div style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap;">
+                <a-tag v-for="p in conditionPresets" :key="p.expr" color="blue"
+                  style="cursor: pointer; margin-inline-end: 0;"
+                  @click="selectedNode.config.expression = p.expr; markDirty()">
+                  {{ p.label }}
+                </a-tag>
+              </div>
+              <div style="font-size: 11px; opacity: 0.6; margin-top: 6px; line-height: 1.5;">
+                可用字段：confidence, need_human, intent, classification, user_input, knowledge_context, tool_results 等<br />
+                示例：'退货' in user_input · len(tool_results) &gt; 0 · intent == 'order_query'
+              </div>
+            </div>
+
+            <!-- 分类器节点：类别配置 -->
+            <div class="detail-section" v-if="selectedNode.nodeType === 'classifier'">
+              <div class="detail-label">分类类别（LLM 将用户输入归入其中一类）</div>
+              <a-select
+                v-model:value="classifierCategories"
+                mode="tags"
+                size="small"
+                style="width: 100%;"
+                placeholder="输入类别后回车，如：产品咨询"
+                :token-separators="[',', '，']"
+                @change="onClassifierCategoriesChange"
+              />
+              <div style="font-size: 11px; opacity: 0.6; margin-top: 6px; line-height: 1.5;">
+                保存后从本节点拉出连线，会自动按类别生成条件分支（classification == '类别名'）
+              </div>
             </div>
 
             <div class="detail-section">
@@ -423,7 +462,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, markRaw, reactive } from 'vue'
+import { ref, computed, onMounted, markRaw, reactive, watch } from 'vue'
 import {
   VueFlow,
   useVueFlow,
@@ -453,6 +492,8 @@ import {
   RocketOutlined,
   DeleteOutlined,
   SwapOutlined,
+  BranchesOutlined,
+  TagsOutlined,
 } from '@ant-design/icons-vue'
 import { useThemeStore } from '@/stores/theme'
 import { workflowApi } from '@/api/client'
@@ -475,6 +516,7 @@ const nodeTypes = {
 
 // --- Category config ---
 const categories = [
+  { key: 'logic', label: '逻辑判断', color: '#6366f1' },
   { key: 'intent', label: '意图分类', color: '#7c3aed' },
   { key: 'retrieval', label: '检索', color: '#3b82f6' },
   { key: 'tool', label: '工具', color: '#f59e0b' },
@@ -492,6 +534,7 @@ function categoryLabel(cat: string): string {
 
 function categoryIcon(cat: string) {
   const map: Record<string, any> = {
+    logic: markRaw(BranchesOutlined),
     intent: markRaw(AimOutlined),
     retrieval: markRaw(SearchOutlined),
     tool: markRaw(ToolOutlined),
@@ -515,6 +558,8 @@ interface PaletteItem {
 }
 
 const paletteNodes: PaletteItem[] = [
+  { name: '条件判断', nodeType: 'condition', category: 'logic', color: '#6366f1' },
+  { name: '智能分类器', nodeType: 'classifier', category: 'logic', color: '#8b5cf6' },
   { name: '意图分类', nodeType: 'intent', category: 'intent', color: '#7c3aed' },
   { name: '知识检索', nodeType: 'knowledge', category: 'retrieval', color: '#3b82f6' },
   { name: '记忆检索', nodeType: 'memory', category: 'retrieval', color: '#3b82f6' },
@@ -524,6 +569,26 @@ const paletteNodes: PaletteItem[] = [
 ]
 
 const NODE_TEMPLATES: Record<string, any> = {
+  condition: {
+    name: '条件判断',
+    node_type: 'condition',
+    type: 'processing',
+    category: 'logic',
+    description: '逻辑判断节点：对状态字段求值条件表达式，结果存入 condition_result。从本节点拉出的第一条连线自动作为「满足」分支，第二条作为「不满足」分支（if/else）。',
+    inputs: ['任意状态字段'],
+    outputs: ['condition_result'],
+    config: { expression: 'confidence >= 0.5' },
+  },
+  classifier: {
+    name: '智能分类器',
+    node_type: 'classifier',
+    type: 'processing',
+    category: 'logic',
+    description: '用 LLM 将用户输入分类到自定义类别（如：产品咨询 / 售后问题 / 投诉），结果存入 classification。下游连线用条件 classification == \'类别名\' 路由。',
+    inputs: ['user_input'],
+    outputs: ['classification', 'classification_confidence'],
+    config: { categories: ['产品咨询', '售后问题', '其他'] },
+  },
   intent: {
     name: '意图分类',
     node_type: 'intent',
@@ -582,6 +647,8 @@ const NODE_TEMPLATES: Record<string, any> = {
 
 // --- Node/Edge name mapping ---
 const nodeNameMap: Record<string, string> = {
+  condition: '条件判断',
+  classifier: '智能分类器',
   intent: '意图分类',
   knowledge: '知识检索',
   memory: '记忆检索',
@@ -670,6 +737,16 @@ const selectedNode = ref<any>(null)
 const selectedNodeExecution = ref<any>(null)
 const selectedEdge = ref<any>(null)
 const nodeConfigText = ref('')
+const selectedDefNode = ref<any>(null)
+
+// 面板编辑写回 definition（修复：此前面板改名/改参数不会保存到画布数据）
+watch(selectedNode, (val) => {
+  if (!val || !selectedDefNode.value) return
+  if (selectedDefNode.value.id !== val.id) return
+  selectedDefNode.value.name = val.name
+  selectedDefNode.value.description = val.description
+  selectedDefNode.value.config = val.config
+}, { deep: true })
 
 const createModalOpen = ref(false)
 const createForm = reactive({ name: '', code: '', description: '' })
@@ -792,6 +869,28 @@ function onNodeClick(event: any) {
   }
   nodeConfigText.value = JSON.stringify(node.data.config || {}, null, 2)
 
+  // 归一化逻辑判断节点的默认配置
+  if (selectedNode.value.nodeType === 'condition') {
+    if (!selectedNode.value.config || typeof selectedNode.value.config !== 'object') {
+      selectedNode.value.config = {}
+    }
+    if (!selectedNode.value.config.expression) {
+      selectedNode.value.config.expression = 'confidence >= 0.5'
+    }
+  }
+  if (selectedNode.value.nodeType === 'classifier') {
+    if (!selectedNode.value.config || typeof selectedNode.value.config !== 'object') {
+      selectedNode.value.config = {}
+    }
+    if (!Array.isArray(selectedNode.value.config.categories) || !selectedNode.value.config.categories.length) {
+      selectedNode.value.config.categories = ['产品咨询', '售后问题', '其他']
+    }
+    classifierCategories.value = [...selectedNode.value.config.categories]
+  }
+
+  // 记录 definition 中的源节点引用，供深度监听写回（修复面板编辑不生效的问题）
+  selectedDefNode.value = definition.value.nodes.find((n: any) => n.id === node.id) || null
+
   if (!editMode.value && executionPath.value) {
     selectedNodeExecution.value = executionPath.value.steps.find(
       (s: any) => s.node_name === node.id
@@ -818,6 +917,7 @@ function onPaneClick() {
   selectedNode.value = null
   selectedNodeExecution.value = null
   selectedEdge.value = null
+  selectedDefNode.value = null
 }
 
 function onConnect(connection: Connection) {
@@ -836,6 +936,68 @@ function onConnect(connection: Connection) {
   }
 
   const edgeId = `e-${connection.source}-${connection.target}-${Date.now()}`
+
+  // 条件判断节点：自动生成 if/else 分支
+  // 第 1 条出线 = 满足（condition_result），第 2 条 = 不满足（!condition_result）
+  const sourceNode = definition.value.nodes.find((n: any) => n.id === connection.source)
+  if (sourceNode?.nodeType === 'condition') {
+    const outCondEdges = definition.value.edges.filter(
+      (e: any) => e.source === connection.source && e.edge_type === 'conditional'
+    )
+    if (outCondEdges.length === 0) {
+      definition.value.edges.push({
+        id: edgeId,
+        source: connection.source,
+        target: connection.target,
+        label: '满足',
+        condition: 'condition_result',
+        edge_type: 'conditional',
+      })
+      markDirty()
+      message.success('已创建「满足」分支，再拉一条线即自动成为「不满足」分支')
+      return
+    }
+    if (outCondEdges.length === 1) {
+      definition.value.edges.push({
+        id: edgeId,
+        source: connection.source,
+        target: connection.target,
+        label: '不满足',
+        condition: '!condition_result',
+        edge_type: 'conditional',
+      })
+      markDirty()
+      message.success('已创建「不满足」分支（if/else 完成）')
+      return
+    }
+    message.warning('条件判断节点最多两条出线（满足 / 不满足），如需更多分支请再添加条件判断节点')
+    return
+  }
+
+  // 分类器节点：自动按类别生成条件连线
+  if (sourceNode?.nodeType === 'classifier') {
+    const categories: string[] = sourceNode.config?.categories || []
+    const usedLabels = new Set(
+      definition.value.edges
+        .filter((e: any) => e.source === connection.source)
+        .map((e: any) => e.condition)
+    )
+    const nextCategory = categories.find((c: string) => !usedLabels.has(`classification == '${c}'`))
+    if (nextCategory) {
+      definition.value.edges.push({
+        id: edgeId,
+        source: connection.source,
+        target: connection.target,
+        label: nextCategory,
+        condition: `classification == '${nextCategory}'`,
+        edge_type: 'conditional',
+      })
+      markDirty()
+      message.success(`已创建「${nextCategory}」分支连线`)
+      return
+    }
+  }
+
   definition.value.edges.push({
     id: edgeId,
     source: connection.source,
@@ -953,10 +1115,30 @@ function addNode(nodeType: string, position: { x: number; y: number }) {
     inputs: [...template.inputs],
     outputs: [...template.outputs],
     position: { x: Math.round(position.x), y: Math.round(position.y) },
-    config: {},
+    config: JSON.parse(JSON.stringify(template.config || {})),
   })
   markDirty()
   message.success(`已添加「${template.name}」节点`)
+}
+
+// --- 逻辑判断节点配置 ---
+
+const conditionPresets = [
+  { label: '置信度达标', expr: 'confidence >= 0.5' },
+  { label: '需要转人工', expr: 'need_human' },
+  { label: '知识已命中', expr: 'len(knowledge_context) > 0' },
+  { label: '包含退货', expr: "'退货' in user_input" },
+]
+
+const classifierCategories = ref<string[]>([])
+
+function onClassifierCategoriesChange(vals: string[]) {
+  if (!selectedNode.value) return
+  if (!selectedNode.value.config || typeof selectedNode.value.config !== 'object') {
+    selectedNode.value.config = {}
+  }
+  selectedNode.value.config.categories = vals.filter((v: string) => v.trim())
+  markDirty()
 }
 
 // --- Workflow CRUD ---
