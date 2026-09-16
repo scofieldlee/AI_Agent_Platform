@@ -517,23 +517,34 @@ async def _run_video_generation_flow(state, user_input, executor, registry) -> l
     return tool_results
 
 
-async def tool_node(state: AgentState) -> Dict[str, Any]:
+async def tool_node(state: AgentState, node_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Execute tools based on intent — multi-tool dispatcher.
 
-    Intent → Tool mapping:
+    Intent → Tool mapping (built-in defaults below) can be overridden per
+    node from the workflow editor via ``node_config.intent_tool_map``:
+
+        {"intent_tool_map": {"product_info": ["product_query", "kb_search"]}}
+
+    Node-level entries replace the built-in mapping for the same intent
+    (partial overrides are fine); intents absent from both run no tools.
+    Note: the dedicated image/video generation flows are intent-driven and
+    ignore intent_tool_map overrides.
+
+    Built-in defaults:
       - order_query           → order_query + logistics_query (tracking details)
-      - product_info          → product_query + inventory_query
-      - product_compare       → product_query + inventory_query
-      - purchase_advice       → product_query + inventory_query
+      - product_info          → product_query + inventory_query + kb search
+      - product_compare       → product_query + inventory_query + kb search
+      - purchase_advice       → product_query + inventory_query + kb search
       - after_sale            → refund_query + logistics_query + order_query
       - other intents         → no-op
 
     Multiple tools can run in parallel for richer context.
     """
+    node_config = node_config or {}
     user_input = state.get("user_input", "")
     intent = state.get("intent", "unknown")
 
-    # Define which intents trigger which tools
+    # Define which intents trigger which tools (built-in defaults)
     TOOL_MAP = {
         "order_query": ["order_query", "logistics_query"],
         "product_info": ["product_query", "inventory_query", "multimodal_kb_search"],
@@ -544,6 +555,9 @@ async def tool_node(state: AgentState) -> Dict[str, Any]:
         "image_generation": ["image_generation"],
         "video_generation": ["video_generation"],
     }
+
+    # Node-level intent→tools mapping overrides built-in defaults per intent
+    TOOL_MAP = {**TOOL_MAP, **(node_config.get("intent_tool_map") or {})}
 
     tools_to_run = TOOL_MAP.get(intent, [])
     if not tools_to_run:

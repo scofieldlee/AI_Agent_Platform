@@ -302,6 +302,30 @@
               </div>
             </div>
 
+            <!-- 工具节点：意图 → 工具映射 -->
+            <div class="detail-section" v-if="selectedNode.nodeType === 'tool'">
+              <div class="detail-label">意图 → 工具映射（覆盖后端内置默认）</div>
+              <div v-for="it in TOOL_INTENTS" :key="it.key" style="margin-bottom: 8px;">
+                <div style="font-size: 11px; opacity: 0.75; margin-bottom: 2px;">{{ it.label }}</div>
+                <a-select
+                  :value="intentToolsValue(it.key)"
+                  :options="toolSelectOptions"
+                  mode="multiple"
+                  size="small"
+                  style="width: 100%;"
+                  :placeholder="it.key === 'image_generation' || it.key === 'video_generation' ? '走专用生成流程（不可改）' : '不执行工具'"
+                  :disabled="it.key === 'image_generation' || it.key === 'video_generation'"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  @change="(vals: any) => onIntentToolsChange(it.key, vals)"
+                />
+              </div>
+              <div style="font-size: 11px; opacity: 0.6; margin-top: 6px; line-height: 1.5;">
+                工具列表来自「工具中心」已注册工具；清空某意图的工具 = 恢复后端内置默认。图片/视频生成走专用流程，不在此配置
+              </div>
+            </div>
+
             <!-- 条件判断节点：条件表达式 -->
             <div class="detail-section" v-if="selectedNode.nodeType === 'condition'">
               <div class="detail-label">条件表达式（结果写入 condition_result）</div>
@@ -536,7 +560,7 @@ import {
   TagsOutlined,
 } from '@ant-design/icons-vue'
 import { useThemeStore } from '@/stores/theme'
-import { workflowApi, modelsApi } from '@/api/client'
+import { workflowApi, modelsApi, toolsApi } from '@/api/client'
 import WorkflowNode from '@/components/WorkflowNode.vue'
 
 // Import Vue Flow styles
@@ -794,6 +818,51 @@ async function fetchModelOptions() {
   } catch { /* silent: 下拉框为空时仍可走 Agent 级默认模型 */ }
 }
 
+// --- 工具节点：已注册工具列表（来自工具注册表） ---
+const toolOptions = ref<any[]>([])
+const toolSelectOptions = computed(() =>
+  toolOptions.value.map((t: any) => ({
+    value: t.name,
+    label: `${t.name}（${t.description || t.tool_type || '工具'}）`,
+  }))
+)
+async function fetchToolOptions() {
+  try {
+    const res = await toolsApi.list()
+    toolOptions.value = res.data || []
+  } catch { /* silent */ }
+}
+
+// 工具节点：意图清单（与后端内置 TOOL_MAP 对应）
+const TOOL_INTENTS = [
+  { key: 'order_query', label: '订单查询 (order_query)' },
+  { key: 'product_info', label: '产品咨询 (product_info)' },
+  { key: 'product_compare', label: '产品比较 (product_compare)' },
+  { key: 'purchase_advice', label: '购买建议 (purchase_advice)' },
+  { key: 'after_sale', label: '售后问题 (after_sale)' },
+  { key: 'knowledge_search', label: '知识搜索 (knowledge_search)' },
+  { key: 'image_generation', label: '图片生成 (image_generation)' },
+  { key: 'video_generation', label: '视频生成 (video_generation)' },
+]
+// 意图 → 工具映射的实时视图（编辑面板用；写回 config.intent_tool_map）
+function intentToolsValue(intent: string): string[] {
+  return (selectedNode.value?.config?.intent_tool_map || {})[intent] || []
+}
+function onIntentToolsChange(intent: string, tools: string[]) {
+  if (!selectedNode.value) return
+  if (!selectedNode.value.config || typeof selectedNode.value.config !== 'object') {
+    selectedNode.value.config = {}
+  }
+  const map = { ...(selectedNode.value.config.intent_tool_map || {}) }
+  if (tools && tools.length) {
+    map[intent] = tools
+  } else {
+    delete map[intent] // 清空 = 恢复后端内置默认
+  }
+  selectedNode.value.config.intent_tool_map = map
+  markDirty()
+}
+
 // 面板编辑写回 definition（修复：此前面板改名/改参数不会保存到画布数据）
 watch(selectedNode, (val) => {
   if (!val || !selectedDefNode.value) return
@@ -946,6 +1015,15 @@ function onNodeClick(event: any) {
   if (selectedNode.value.nodeType === 'llm') {
     if (!selectedNode.value.config || typeof selectedNode.value.config !== 'object') {
       selectedNode.value.config = {}
+    }
+  }
+  // 归一化工具节点配置
+  if (selectedNode.value.nodeType === 'tool') {
+    if (!selectedNode.value.config || typeof selectedNode.value.config !== 'object') {
+      selectedNode.value.config = {}
+    }
+    if (!selectedNode.value.config.intent_tool_map || typeof selectedNode.value.config.intent_tool_map !== 'object') {
+      selectedNode.value.config.intent_tool_map = {}
     }
   }
 
@@ -1424,7 +1502,7 @@ async function createWorkflow() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadWorkflows(), loadTraces(), fetchModelOptions()])
+  await Promise.all([loadWorkflows(), loadTraces(), fetchModelOptions(), fetchToolOptions()])
   // Load the default workflow definition (or first workflow)
   await loadDefinition()
 })

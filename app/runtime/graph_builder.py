@@ -56,7 +56,7 @@ def _node_impls() -> Dict[str, Callable]:
     }
 
 # Node types that receive their node.config via the ``node_config`` kwarg
-CONFIG_AWARE_TYPES = {"condition", "classifier", "llm"}
+CONFIG_AWARE_TYPES = {"condition", "classifier", "llm", "tool"}
 
 
 # Node type -> trace category (for span recording)
