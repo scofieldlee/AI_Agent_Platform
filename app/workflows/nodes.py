@@ -708,18 +708,27 @@ async def tool_node(state: AgentState) -> Dict[str, Any]:
 
 # --- LLM Response Node ---
 
-async def llm_node(state: AgentState) -> Dict[str, Any]:
+async def llm_node(state: AgentState, node_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Generate response using LLM with knowledge context.
 
     Uses System Prompt + Knowledge Context + User Input -> LLM -> Answer.
     System prompt, temperature, and max_tokens are loaded from agent config
     if available; otherwise falls back to DEFAULT_SYSTEM_PROMPT.
 
+    Node-level overrides (from the workflow editor's node config, takes
+    precedence over agent-level config):
+        - model_config_id: per-node model selection (Model Center config id)
+        - system_prompt:   per-node prompt; when absent, the legacy ``description``
+                           text is promoted to the system prompt for backward
+                           compatibility with nodes authored before model selection
+        - temperature / max_tokens: per-node sampling params
+
     If attachments are present:
     - Text-type (pdf/word/excel/text): already injected into user_input by the endpoint
     - Image-type: passed as base64 to multimodal model via ModelService
     - Video-type: metadata injected as text, agent responds with "received, transfer to human"
     """
+    node_config = node_config or {}
     user_input = state.get("user_input", "")
     knowledge_context = state.get("knowledge_context", "")
     memory_context = state.get("memory_context", "")
@@ -731,20 +740,37 @@ async def llm_node(state: AgentState) -> Dict[str, Any]:
 
     # Load agent config (system_prompt, temperature, max_tokens, model)
     agent_config = await _load_agent_config(agent_id)
-    system_prompt = agent_config.get("system_prompt") or DEFAULT_SYSTEM_PROMPT
-    temperature = agent_config.get("temperature")
-    max_tokens = agent_config.get("max_tokens", 4096)
-    model_config_id = agent_config.get("model_config_id")
+
+    # Node-level overrides take precedence over agent-level config
+    node_model_id = node_config.get("model_config_id")
+    model_config_id = node_model_id or agent_config.get("model_config_id")
 
     # Backward compatibility: old configs stored "model" as model_id string
     if not model_config_id and agent_config.get("model"):
         model_config_id = await _resolve_model_config_id(agent_config.get("model"))
 
+    # System prompt priority: node system_prompt > node description (legacy) > agent > default
+    system_prompt = (
+        node_config.get("system_prompt")
+        or (node_config.get("description") or "").strip() or None
+        or agent_config.get("system_prompt")
+        or DEFAULT_SYSTEM_PROMPT
+    )
+    # NOTE: use explicit None checks (not dict.get defaults) because the editor
+    # may persist cleared inputs as null in the node config JSON
+    temperature = node_config.get("temperature")
+    if temperature is None:
+        temperature = agent_config.get("temperature")
+    max_tokens = node_config.get("max_tokens")
+    if max_tokens is None:
+        max_tokens = agent_config.get("max_tokens", 4096)
+
     logger.info(
         f"LLM node config | agent_id={agent_id} "
         f"has_custom_prompt={'system_prompt' in agent_config} "
         f"temperature={temperature} max_tokens={max_tokens} "
-        f"model_config_id={model_config_id}"
+        f"model_config_id={model_config_id} "
+        f"model_source={'node' if node_model_id else 'agent'}"
     )
 
     # Build tool context string from structured tool results

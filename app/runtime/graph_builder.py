@@ -56,7 +56,7 @@ def _node_impls() -> Dict[str, Callable]:
     }
 
 # Node types that receive their node.config via the ``node_config`` kwarg
-CONFIG_AWARE_TYPES = {"condition", "classifier"}
+CONFIG_AWARE_TYPES = {"condition", "classifier", "llm"}
 
 
 # Node type -> trace category (for span recording)
@@ -205,7 +205,12 @@ def build_graph_from_config(
     for node_id, node in node_by_id.items():
         impl = impls[node["node_type"]]
         if node["node_type"] in CONFIG_AWARE_TYPES:
-            impl = functools.partial(impl, node_config=node.get("config") or {})
+            cfg = dict(node.get("config") or {})
+            # LLM nodes: promote the node-level description into the config so
+            # llm_node can use it as a per-node System Prompt fallback
+            if node["node_type"] == "llm" and node.get("description"):
+                cfg.setdefault("description", node["description"])
+            impl = functools.partial(impl, node_config=cfg)
         if tracer is not None:
             category = NODE_TRACE_CATEGORY.get(node["node_type"], "workflow")
             impl = tracer.wrap_node(node_id, impl, category)

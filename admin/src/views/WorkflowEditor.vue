@@ -253,13 +253,53 @@
             </div>
 
             <div class="detail-section">
-              <div class="detail-label">描述</div>
+              <div class="detail-label">{{ selectedNode.nodeType === 'llm' ? '描述 / System Prompt' : '描述' }}</div>
               <a-textarea
                 v-model:value="selectedNode.description"
                 :rows="3"
                 size="small"
                 @change="markDirty"
               />
+              <div v-if="selectedNode.nodeType === 'llm'" style="font-size: 11px; opacity: 0.6; margin-top: 6px; line-height: 1.5;">
+                LLM 节点：此描述将作为该节点的 System Prompt（留空时使用 Agent 级默认提示词）
+              </div>
+            </div>
+
+            <!-- LLM 节点：模型选择与采样参数 -->
+            <div class="detail-section" v-if="selectedNode.nodeType === 'llm'">
+              <div class="detail-label">模型（覆盖 Agent 级默认）</div>
+              <a-select
+                v-model:value="selectedNode.config.model_config_id"
+                :options="modelSelectOptions"
+                size="small"
+                style="width: 100%;"
+                placeholder="跟随 Agent 默认配置"
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                @change="markDirty"
+              />
+              <div style="display: flex; gap: 8px; margin-top: 8px;">
+                <div style="flex: 1;">
+                  <div class="detail-label" style="font-size: 11px;">Temperature</div>
+                  <a-input-number
+                    v-model:value="selectedNode.config.temperature"
+                    size="small" style="width: 100%;" :min="0" :max="2" :step="0.1"
+                    placeholder="默认" @change="markDirty"
+                  />
+                </div>
+                <div style="flex: 1;">
+                  <div class="detail-label" style="font-size: 11px;">Max Tokens</div>
+                  <a-input-number
+                    v-model:value="selectedNode.config.max_tokens"
+                    size="small" style="width: 100%;" :min="1" :step="256"
+                    placeholder="默认" @change="markDirty"
+                  />
+                </div>
+              </div>
+              <div style="font-size: 11px; opacity: 0.6; margin-top: 6px; line-height: 1.5;">
+                不同节点可选不同模型（如：分类用轻量模型、生成用旗舰模型），模型在「模型中心」维护
+              </div>
             </div>
 
             <!-- 条件判断节点：条件表达式 -->
@@ -496,7 +536,7 @@ import {
   TagsOutlined,
 } from '@ant-design/icons-vue'
 import { useThemeStore } from '@/stores/theme'
-import { workflowApi } from '@/api/client'
+import { workflowApi, modelsApi } from '@/api/client'
 import WorkflowNode from '@/components/WorkflowNode.vue'
 
 // Import Vue Flow styles
@@ -739,6 +779,21 @@ const selectedEdge = ref<any>(null)
 const nodeConfigText = ref('')
 const selectedDefNode = ref<any>(null)
 
+// --- LLM 节点模型选择（来自模型中心） ---
+const modelOptions = ref<any[]>([])
+const modelSelectOptions = computed(() =>
+  modelOptions.value.map((m: any) => ({
+    value: m.id,
+    label: `${m.name}（${m.provider_name}${m.is_default ? ' · 默认' : ''}）`,
+  }))
+)
+async function fetchModelOptions() {
+  try {
+    const res = await modelsApi.selectable()
+    modelOptions.value = res.data || []
+  } catch { /* silent: 下拉框为空时仍可走 Agent 级默认模型 */ }
+}
+
 // 面板编辑写回 definition（修复：此前面板改名/改参数不会保存到画布数据）
 watch(selectedNode, (val) => {
   if (!val || !selectedDefNode.value) return
@@ -886,6 +941,12 @@ function onNodeClick(event: any) {
       selectedNode.value.config.categories = ['产品咨询', '售后问题', '其他']
     }
     classifierCategories.value = [...selectedNode.value.config.categories]
+  }
+  // 归一化 LLM 节点配置（历史节点可能没有 config 对象）
+  if (selectedNode.value.nodeType === 'llm') {
+    if (!selectedNode.value.config || typeof selectedNode.value.config !== 'object') {
+      selectedNode.value.config = {}
+    }
   }
 
   // 记录 definition 中的源节点引用，供深度监听写回（修复面板编辑不生效的问题）
@@ -1363,7 +1424,7 @@ async function createWorkflow() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadWorkflows(), loadTraces()])
+  await Promise.all([loadWorkflows(), loadTraces(), fetchModelOptions()])
   // Load the default workflow definition (or first workflow)
   await loadDefinition()
 })
