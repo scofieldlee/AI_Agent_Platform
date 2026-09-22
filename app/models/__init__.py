@@ -25,6 +25,7 @@ from app.models.model_config import (
     ModelProvider, ModelConfig, ModelUsageLog,
 )
 from app.models.audit_log import AuditLog
+from app.models.channel import AgentChannel, ChannelConversation
 
 __all__ = [
     # User
@@ -47,4 +48,6 @@ __all__ = [
     "ModelProvider", "ModelConfig", "ModelUsageLog",
     # Audit
     "AuditLog",
+    # Channel
+    "AgentChannel", "ChannelConversation",
 ]

@@ -424,6 +424,66 @@
             </a-checkbox-group>
           </div>
 
+          <!-- IM 渠道集成 -->
+          <div class="config-section">
+            <div class="section-title"><CustomerServiceOutlined /> IM 渠道集成</div>
+            <div style="font-size: 12px; opacity: 0.6; margin-bottom: 10px; line-height: 1.6;">
+              绑定飞书机器人后，用户在飞书单聊或群里 @机器人 即可直接与该 Agent 对话，无需登录本系统。
+              需先在<a href="https://open.feishu.cn/app" target="_blank">飞书开放平台</a>创建企业自建应用并开启机器人能力。
+            </div>
+
+            <div v-for="ch in agentChannels" :key="ch.id"
+              style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border: 1px solid rgba(128,128,128,0.2); border-radius: 8px; margin-bottom: 8px;">
+              <div>
+                <div style="font-size: 13px; font-weight: 500;">
+                  {{ ch.name }}
+                  <a-tag :color="ch.channel_type === 'feishu' ? 'blue' : 'default'" style="font-size: 11px;">{{ ch.channel_type }}</a-tag>
+                  <a-tag :color="ch.status === 'active' ? 'green' : 'default'" style="font-size: 11px;">
+                    {{ ch.status === 'active' ? '启用' : '停用' }}
+                  </a-tag>
+                </div>
+                <div style="font-size: 11px; opacity: 0.55; margin-top: 2px;">
+                  App ID: {{ ch.credentials?.app_id }}
+                  · 最近连接: {{ ch.last_connected_at ? formatTime(ch.last_connected_at) : '未连接' }}
+                  <span v-if="ch.last_error" style="color: #ff4d4f;">· {{ ch.last_error.substring(0, 40) }}</span>
+                </div>
+              </div>
+              <a-space size="small">
+                <a-button size="small" @click="editChannel(ch)">编辑</a-button>
+                <a-button size="small" @click="testChannel(ch)" :loading="testingChannelId === ch.id">测试</a-button>
+                <a-button size="small" @click="toggleChannel(ch)">{{ ch.status === 'active' ? '停用' : '启用' }}</a-button>
+                <a-popconfirm title="删除该渠道？" @confirm="removeChannel(ch)">
+                  <a-button size="small" danger>删除</a-button>
+                </a-popconfirm>
+              </a-space>
+            </div>
+
+            <a-button v-if="!channelFormVisible" size="small" type="dashed" block @click="showChannelForm">
+              <PlusOutlined /> 绑定飞书机器人
+            </a-button>
+
+            <div v-if="channelFormVisible" style="border: 1px dashed rgba(128,128,128,0.35); border-radius: 8px; padding: 12px; margin-top: 4px;">
+              <a-form layout="vertical" size="small">
+                <a-form-item label="渠道名称" required>
+                  <a-input v-model:value="channelForm.name" placeholder="如：飞书客服机器人" />
+                </a-form-item>
+                <a-form-item label="App ID" required>
+                  <a-input v-model:value="channelForm.app_id" placeholder="cli_xxx" />
+                </a-form-item>
+                <a-form-item :label="editingChannelId ? 'App Secret（留空则不修改）' : 'App Secret'" :required="!editingChannelId">
+                  <a-input-password v-model:value="channelForm.app_secret" placeholder="飞书应用的 App Secret" />
+                </a-form-item>
+                <div style="display: flex; gap: 8px;">
+                  <a-button size="small" @click="channelFormVisible = false">取消</a-button>
+                  <a-button size="small" @click="testChannelForm" :loading="testingForm">测试凭证</a-button>
+                  <a-button type="primary" size="small" :loading="savingChannel" @click="saveChannel">
+                    {{ editingChannelId ? '保存修改' : '绑定' }}
+                  </a-button>
+                </div>
+              </a-form>
+            </div>
+          </div>
+
           <!-- Version History -->
           <div class="config-section" v-if="agentDetail.versions?.length > 0">
             <div class="section-title"><HistoryOutlined /> 版本历史 ({{ agentDetail.versions.length }})</div>
@@ -533,8 +593,9 @@ import {
   PaperClipOutlined, ApartmentOutlined,
   ExclamationCircleOutlined,
   LinkOutlined, CopyOutlined,
+  CustomerServiceOutlined,
 } from '@ant-design/icons-vue'
-import { agentsApi, toolsApi, knowledgeApi, modelsApi, workflowApi } from '@/api/client'
+import { agentsApi, toolsApi, knowledgeApi, modelsApi, workflowApi, channelsApi } from '@/api/client'
 import { formatTime } from '@/utils/time'
 
 // --- Agent list ---
@@ -723,6 +784,11 @@ async function openConfigDrawer(agent: any) {
   editingAgent.value = agent
   drawerVisible.value = true
   detailLoading.value = true
+  channelFormVisible.value = false
+  editingChannelId.value = null
+
+  // IM 渠道列表
+  loadChannels(agent.id)
 
   // Ensure model options are loaded before populating form
   if (modelOptions.value.length === 0) {
@@ -942,6 +1008,140 @@ async function handleCreate() {
     message.error('创建失败: ' + err.message)
   } finally {
     creating.value = false
+  }
+}
+
+// ===== IM 渠道集成 =====
+const agentChannels = ref<any[]>([])
+const channelFormVisible = ref(false)
+const editingChannelId = ref<number | null>(null)
+const savingChannel = ref(false)
+const testingChannelId = ref<number | null>(null)
+const testingForm = ref(false)
+const channelForm = reactive({ name: '', app_id: '', app_secret: '' })
+
+async function loadChannels(agentId: number) {
+  try {
+    const res = await channelsApi.list(agentId)
+    agentChannels.value = res.data.items || []
+  } catch {
+    agentChannels.value = []
+  }
+}
+
+function showChannelForm() {
+  editingChannelId.value = null
+  channelForm.name = ''
+  channelForm.app_id = ''
+  channelForm.app_secret = ''
+  channelFormVisible.value = true
+}
+
+function editChannel(ch: any) {
+  editingChannelId.value = ch.id
+  channelForm.name = ch.name
+  channelForm.app_id = ch.credentials?.app_id || ''
+  channelForm.app_secret = ''  // 掩码保护：留空表示不修改
+  channelFormVisible.value = true
+}
+
+function validateChannelForm(): boolean {
+  if (!channelForm.name.trim()) { message.error('请填写渠道名称'); return false }
+  if (!channelForm.app_id.trim()) { message.error('请填写 App ID'); return false }
+  if (!editingChannelId.value && !channelForm.app_secret.trim()) {
+    message.error('请填写 App Secret'); return false
+  }
+  return true
+}
+
+function buildChannelPayload(): Record<string, any> {
+  return {
+    channel_type: 'feishu',
+    name: channelForm.name.trim(),
+    agent_id: editingAgent.value?.id,
+    credentials: {
+      app_id: channelForm.app_id.trim(),
+      app_secret: channelForm.app_secret.trim()
+    }
+  }
+}
+
+async function saveChannel() {
+  if (!validateChannelForm()) return
+  savingChannel.value = true
+  try {
+    if (editingChannelId.value) {
+      await channelsApi.update(editingChannelId.value, buildChannelPayload())
+      message.success('渠道已更新，消息泵将在 1 分钟内重连')
+    } else {
+      await channelsApi.create(buildChannelPayload())
+      message.success('渠道已绑定，消息泵将在 1 分钟内自动连接')
+    }
+    channelFormVisible.value = false
+    editingChannelId.value = null
+    if (editingAgent.value) await loadChannels(editingAgent.value.id)
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || '保存失败')
+  } finally { savingChannel.value = false }
+}
+
+async function testChannel(ch: any) {
+  testingChannelId.value = ch.id
+  try {
+    const res = await channelsApi.test(ch.id)
+    if (res.data.success) {
+      message.success('凭证有效，连接正常')
+      if (editingAgent.value) await loadChannels(editingAgent.value.id)
+    } else {
+      message.error(res.data.detail || '连接失败')
+    }
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || '测试失败')
+  } finally { testingChannelId.value = null }
+}
+
+async function testChannelForm() {
+  // 未保存的表单：先临时创建（停用状态）再测试，失败即删除
+  if (!validateChannelForm()) return
+  testingForm.value = true
+  let tempId: number | null = null
+  try {
+    const payload = buildChannelPayload()
+    payload.status = 'disabled'
+    const created = await channelsApi.create(payload)
+    tempId = created.data.id
+    const res = await channelsApi.test(created.data.id as number)
+    if (res.data.success) {
+      message.success('凭证有效')
+    } else {
+      message.error(res.data.detail || '凭证校验失败')
+    }
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || '测试失败')
+  } finally {
+    if (tempId) {
+      try { await channelsApi.remove(tempId) } catch {}
+    }
+    testingForm.value = false
+  }
+}
+
+async function toggleChannel(ch: any) {
+  try {
+    await channelsApi.update(ch.id, { status: ch.status === 'active' ? 'disabled' : 'active' })
+    if (editingAgent.value) await loadChannels(editingAgent.value.id)
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || '操作失败')
+  }
+}
+
+async function removeChannel(ch: any) {
+  try {
+    await channelsApi.remove(ch.id)
+    message.success('渠道已删除')
+    if (editingAgent.value) await loadChannels(editingAgent.value.id)
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || '删除失败')
   }
 }
 

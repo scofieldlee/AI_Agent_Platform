@@ -185,6 +185,17 @@ export const toolsApi = {
     client.post(`/tools/${name}/execute`, { parameters }, { timeout: 180000 })
 }
 
+// ===== Channels (IM integrations) =====
+export const channelsApi = {
+  list: (agentId: number) => client.get('/channels', { params: { agent_id: agentId } }),
+  types: () => client.get('/channels/types'),
+  create: (data: Record<string, any>) =>
+    client.post('/channels', data),
+  update: (id: number, data: Record<string, any>) => client.put(`/channels/${id}`, data),
+  remove: (id: number) => client.delete(`/channels/${id}`),
+  test: (id: number) => client.post(`/channels/${id}/test`, {}, { timeout: 30000 })
+}
+
 // ===== Workflow =====
 export const workflowApi = {
   list: () => client.get('/workflow'),
