@@ -18,11 +18,14 @@ CHANNEL_SESSION_TTL_MINUTES = 30
 async def list_channels(
     db: AsyncSession,
     agent_id: Optional[int] = None,
+    employee_id: Optional[int] = None,
     channel_type: Optional[str] = None,
 ) -> List[AgentChannel]:
     stmt = select(AgentChannel).order_by(AgentChannel.id.desc())
     if agent_id:
         stmt = stmt.where(AgentChannel.agent_id == agent_id)
+    if employee_id:
+        stmt = stmt.where(AgentChannel.employee_id == employee_id)
     if channel_type:
         stmt = stmt.where(AgentChannel.channel_type == channel_type)
     result = await db.execute(stmt)

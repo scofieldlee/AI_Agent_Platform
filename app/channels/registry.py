@@ -5,12 +5,13 @@ Channel adapter registry.
 from typing import Dict, Type
 
 from app.channels.base import ChannelAdapter
+from app.channels.dingtalk_adapter import DingTalkAdapter
 from app.channels.feishu_adapter import FeishuAdapter
 
 ADAPTER_REGISTRY: Dict[str, Type[ChannelAdapter]] = {
     "feishu": FeishuAdapter,
-    # "dingtalk": DingTalkAdapter,   # Phase 2
-    # "wecom": WeComAdapter,         # Phase 2
+    "dingtalk": DingTalkAdapter,
+    # "wecom": WeComAdapter,   # Phase 2
 }
 
 SUPPORTED_CHANNEL_TYPES = list(ADAPTER_REGISTRY.keys())

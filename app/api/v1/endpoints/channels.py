@@ -64,10 +64,11 @@ async def list_channel_types():
 @router.get("", response_model=ChannelListResponse)
 async def list_channels_endpoint(
     agent_id: Optional[int] = None,
+    employee_id: Optional[int] = None,
     channel_type: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    channels = await list_channels(db, agent_id=agent_id, channel_type=channel_type)
+    channels = await list_channels(db, agent_id=agent_id, employee_id=employee_id, channel_type=channel_type)
     return ChannelListResponse(items=[ChannelResponse.from_channel(c) for c in channels])
 
 

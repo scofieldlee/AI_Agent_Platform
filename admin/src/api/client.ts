@@ -187,7 +187,8 @@ export const toolsApi = {
 
 // ===== Channels (IM integrations) =====
 export const channelsApi = {
-  list: (agentId: number) => client.get('/channels', { params: { agent_id: agentId } }),
+  list: (params: { agent_id?: number; employee_id?: number }) =>
+    client.get('/channels', { params }),
   types: () => client.get('/channels/types'),
   create: (data: Record<string, any>) =>
     client.post('/channels', data),

@@ -421,9 +421,9 @@ class ChannelWorker:
         self._threads.pop(channel_id, None)
 
     async def _reconcile(self) -> None:
-        """Sync running threads with active feishu channels in DB."""
+        """Sync running threads with active channels in DB (all supported types)."""
         async with async_session_factory() as db:
-            channels = await list_active_channels(db, channel_type="feishu")
+            channels = await list_active_channels(db)
         active_ids = {c.id for c in channels}
 
         # stop threads whose channel disappeared or was disabled
