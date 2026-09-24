@@ -35,6 +35,26 @@ async def _validate_agent(db: AsyncSession, agent_id: int) -> None:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
 
 
+async def _validate_target(db: AsyncSession, target_type: str,
+                           agent_id: Optional[int], employee_id: Optional[int]) -> None:
+    """Validate the binding target according to target_type."""
+    if target_type == "agent":
+        if not agent_id:
+            raise HTTPException(status_code=400, detail="绑定 Agent 时必须提供 agent_id")
+        await _validate_agent(db, agent_id)
+    elif target_type == "employee":
+        if not employee_id:
+            raise HTTPException(status_code=400, detail="绑定 AI 员工时必须提供 employee_id")
+        from app.models.ai_employee import AIEmployee
+        employee = await db.get(AIEmployee, employee_id)
+        if not employee:
+            raise HTTPException(status_code=404, detail=f"AI 员工 {employee_id} not found")
+        if employee.status != "published":
+            raise HTTPException(status_code=400, detail=f"AI 员工「{employee.name}」未发布，请先发布")
+    else:
+        raise HTTPException(status_code=400, detail=f"不支持的绑定类型: {target_type}（支持: agent / employee）")
+
+
 @router.get("/types")
 async def list_channel_types():
     """Supported channel types (for the admin UI dropdown)."""
@@ -58,7 +78,7 @@ async def create_channel_endpoint(payload: ChannelCreate, db: AsyncSession = Dep
             status_code=400,
             detail=f"不支持的渠道类型: {payload.channel_type}（支持: {SUPPORTED_CHANNEL_TYPES}）",
         )
-    await _validate_agent(db, payload.agent_id)
+    await _validate_target(db, payload.target_type, payload.agent_id, payload.employee_id)
     if not (payload.credentials or {}).get("app_id"):
         raise HTTPException(status_code=400, detail="credentials 缺少 app_id")
 
@@ -66,7 +86,9 @@ async def create_channel_endpoint(payload: ChannelCreate, db: AsyncSession = Dep
         db,
         channel_type=payload.channel_type,
         name=payload.name,
+        target_type=payload.target_type,
         agent_id=payload.agent_id,
+        employee_id=payload.employee_id,
         credentials=payload.credentials,
         status=payload.status,
     )
@@ -82,7 +104,14 @@ async def update_channel_endpoint(
         raise HTTPException(status_code=404, detail="Channel not found")
 
     fields = payload.model_dump(exclude_unset=True)
-    if fields.get("agent_id"):
+
+    # Validate binding target when it changes
+    if "target_type" in fields or "agent_id" in fields or "employee_id" in fields:
+        target_type = fields.get("target_type", channel.target_type)
+        agent_id = fields.get("agent_id", channel.agent_id)
+        employee_id = fields.get("employee_id", channel.employee_id)
+        await _validate_target(db, target_type, agent_id, employee_id)
+    elif fields.get("agent_id"):
         await _validate_agent(db, fields["agent_id"])
 
     # Merge credentials: keep existing values for masked ("***") secrets

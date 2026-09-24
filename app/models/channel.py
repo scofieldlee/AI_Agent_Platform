@@ -16,7 +16,12 @@ from app.database.base import Base
 
 
 class AgentChannel(Base):
-    """An IM channel (bot app) bound to one Agent.
+    """An IM channel (bot app) bound to an execution target.
+
+    target_type = "agent"    → agent_id points at a single Agent.
+    target_type = "employee" → employee_id points at an AI Employee team
+                               (multi-agent collaboration: Supervisor /
+                               DAG orchestration).
 
     credentials JSONB holds provider-specific secrets, e.g. for Feishu:
         {"app_id": "cli_xxx", "app_secret": "xxx"}
@@ -26,7 +31,9 @@ class AgentChannel(Base):
 
     channel_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)  # feishu, dingtalk, wecom
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id"), nullable=False, index=True)
+    target_type: Mapped[str] = mapped_column(String(20), nullable=False, default="agent")  # agent | employee
+    agent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("agents.id"), nullable=True, index=True)
+    employee_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ai_employees.id"), nullable=True, index=True)
     credentials: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)
     status: Mapped[str] = mapped_column(String(20), default="active", index=True)  # active, disabled
     last_connected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

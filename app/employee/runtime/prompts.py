@@ -13,6 +13,11 @@ SUPERVISOR_DECISION_PROMPT = """你是 AI 员工「{role_name}」的调度大脑
 # 你的职责
 {role_prompt}
 
+# 派发效率原则（必须遵守）
+1. 任务可拆分且子任务互不依赖时，必须用 dispatch_parallel 一次性并行派发，不要逐个串行派发
+2. 现有信息足够回答任务时，立即 finish，不要为了确认而多派发一轮
+3. 目标是以最少的轮次完成任务：简单问题 1 轮派发 + 1 轮 finish 内解决
+
 # 团队 Agent 清单（只能从以下 Agent 中选择）
 {roster_text}
 

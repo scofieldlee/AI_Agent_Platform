@@ -438,6 +438,7 @@
                 <div style="font-size: 13px; font-weight: 500;">
                   {{ ch.name }}
                   <a-tag :color="ch.channel_type === 'feishu' ? 'blue' : 'default'" style="font-size: 11px;">{{ ch.channel_type }}</a-tag>
+                  <a-tag :color="ch.target_type === 'employee' ? 'purple' : 'cyan'" style="font-size: 11px;">{{ channelTargetLabel(ch) }}</a-tag>
                   <a-tag :color="ch.status === 'active' ? 'green' : 'default'" style="font-size: 11px;">
                     {{ ch.status === 'active' ? '启用' : '停用' }}
                   </a-tag>
@@ -464,6 +465,21 @@
 
             <div v-if="channelFormVisible" style="border: 1px dashed rgba(128,128,128,0.35); border-radius: 8px; padding: 12px; margin-top: 4px;">
               <a-form layout="vertical" size="small">
+                <a-form-item label="绑定对象" required>
+                  <a-radio-group v-model:value="channelForm.target_type" button-style="solid" size="small">
+                    <a-radio-button value="agent">本 Agent（单 Agent 工作流）</a-radio-button>
+                    <a-radio-button value="employee">AI 员工团队（多 Agent 协同）</a-radio-button>
+                  </a-radio-group>
+                </a-form-item>
+                <a-form-item v-if="channelForm.target_type === 'employee'" label="选择 AI 员工团队" required>
+                  <a-select
+                    v-model:value="channelForm.employee_id"
+                    placeholder="选择已发布的 AI 员工团队（Supervisor 将按场景派发给成员 Agent）"
+                    :options="publishedEmployees.map((e: any) => ({ value: e.id, label: `${e.name}（${e.mode === 'supervisor' ? 'Supervisor 动态调度' : 'DAG 编排'}）` }))"
+                    show-search
+                    option-filter-label="label"
+                  />
+                </a-form-item>
                 <a-form-item label="渠道名称" required>
                   <a-input v-model:value="channelForm.name" placeholder="如：飞书客服机器人" />
                 </a-form-item>
@@ -595,7 +611,7 @@ import {
   LinkOutlined, CopyOutlined,
   CustomerServiceOutlined,
 } from '@ant-design/icons-vue'
-import { agentsApi, toolsApi, knowledgeApi, modelsApi, workflowApi, channelsApi } from '@/api/client'
+import { agentsApi, toolsApi, knowledgeApi, modelsApi, workflowApi, channelsApi, employeeApi } from '@/api/client'
 import { formatTime } from '@/utils/time'
 
 // --- Agent list ---
@@ -1018,7 +1034,24 @@ const editingChannelId = ref<number | null>(null)
 const savingChannel = ref(false)
 const testingChannelId = ref<number | null>(null)
 const testingForm = ref(false)
-const channelForm = reactive({ name: '', app_id: '', app_secret: '' })
+const channelForm = reactive({
+  name: '', app_id: '', app_secret: '',
+  target_type: 'agent' as 'agent' | 'employee',
+  agent_id: null as number | null,
+  employee_id: null as number | null
+})
+const publishedEmployees = ref<any[]>([])
+
+async function loadPublishedEmployees() {
+  try {
+    const res = await employeeApi.list({ status: 'published' })
+    publishedEmployees.value = (res.data.items || res.data || []).map((e: any) => ({
+      id: e.id, name: e.name, mode: e.orchestration_mode
+    }))
+  } catch {
+    publishedEmployees.value = []
+  }
+}
 
 async function loadChannels(agentId: number) {
   try {
@@ -1034,7 +1067,11 @@ function showChannelForm() {
   channelForm.name = ''
   channelForm.app_id = ''
   channelForm.app_secret = ''
+  channelForm.target_type = 'agent'
+  channelForm.agent_id = editingAgent.value?.id || null
+  channelForm.employee_id = null
   channelFormVisible.value = true
+  loadPublishedEmployees()
 }
 
 function editChannel(ch: any) {
@@ -1042,7 +1079,19 @@ function editChannel(ch: any) {
   channelForm.name = ch.name
   channelForm.app_id = ch.credentials?.app_id || ''
   channelForm.app_secret = ''  // 掩码保护：留空表示不修改
+  channelForm.target_type = ch.target_type || 'agent'
+  channelForm.agent_id = ch.agent_id
+  channelForm.employee_id = ch.employee_id
   channelFormVisible.value = true
+  loadPublishedEmployees()
+}
+
+function channelTargetLabel(ch: any): string {
+  if (ch.target_type === 'employee') {
+    const emp = publishedEmployees.value.find((e: any) => e.id === ch.employee_id)
+    return `AI 员工 · ${emp ? emp.name : '#' + ch.employee_id}`
+  }
+  return 'Agent · 本 Agent'
 }
 
 function validateChannelForm(): boolean {
@@ -1051,6 +1100,9 @@ function validateChannelForm(): boolean {
   if (!editingChannelId.value && !channelForm.app_secret.trim()) {
     message.error('请填写 App Secret'); return false
   }
+  if (channelForm.target_type === 'employee' && !channelForm.employee_id) {
+    message.error('请选择要绑定的 AI 员工团队'); return false
+  }
   return true
 }
 
@@ -1058,7 +1110,9 @@ function buildChannelPayload(): Record<string, any> {
   return {
     channel_type: 'feishu',
     name: channelForm.name.trim(),
-    agent_id: editingAgent.value?.id,
+    target_type: channelForm.target_type,
+    agent_id: channelForm.target_type === 'agent' ? (editingAgent.value?.id ?? null) : null,
+    employee_id: channelForm.target_type === 'employee' ? channelForm.employee_id : null,
     credentials: {
       app_id: channelForm.app_id.trim(),
       app_secret: channelForm.app_secret.trim()
