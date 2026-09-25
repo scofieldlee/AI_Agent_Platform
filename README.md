@@ -14,16 +14,20 @@
 
 - 🤖 **Agent Runtime** — 基于 LangGraph 的工作流引擎（意图识别 → 知识检索 → 记忆召回 → 工具调用 → LLM 推理 → 人工兜底），支持多 Agent 独立对话
 - 📊 **九大核心中心** — Agent / Workflow / Model / Knowledge / Memory / Tool / Human / Permission / Analytics，全量实现
+- 🤝 **AI 员工（多 Agent 协同）** — Supervisor 动态调度 + DAG 静态编排双模式，按场景分析派发成员 Agent 并汇总结果；决策过程全程可视（工作台 + 决策日志）
+- 💬 **IM 渠道集成** — 飞书（长连接）+ 钉钉（Stream 模式）双通道，免公网回调；单 Agent / AI 员工团队双绑定；多渠道并存；用户侧收执 + 进度推送 + 知识缺失自动转人工
+- 🛡️ **工具执行审批门禁** — 工具分级（安全/敏感），敏感工具执行前挂起等待管理员批准（人工中心审批 + 超时自动拒绝），拒绝原因回传 LLM 组织得体婉拒
+- 🔑 **资源所有权与授权** — Agent / AI 员工数据级隔离：创建者默认拥有，支持按用户（对话/查看/管理三级）与按角色（超级管理员）授权，管理员全局可见
 - 🖼️ **多模态知识库** — 图片/视频素材上传、ffmpeg 视频抽帧与镜头检测、AI 自动分析与打标、审核后向量索引，支持文本检索、以图搜图、图文融合三种检索模式
 - ✨ **AI 图片生成** — 文生图（T2I）/ 图生图（I2I）：自动命中知识库素材或用户上传图片作为参考图进行创作，生成结果本地持久化
 - 🎬 **AI 视频生成** — 文生视频（T2V）/ 图生视频（I2V 首帧驱动），异步任务链路（提交 → 轮询 → 转存），时长 3~15 秒可指定
 - 💰 **Token Plan 计费治理** — 聊天/视觉/生图/生视频全部走阿里千问 Token Plan 套餐内模型，杜绝套餐外按量计费
-- 🔐 **RBAC 权限体系** — 6 角色 19 权限，JWT 双 Token 认证（access 1h + refresh 7d）
-- 📚 **知识库 + 向量检索** — PostgreSQL + pgvector，支持文档上传、自动分块、语义检索
-- 🧩 **可视化工作流编辑器** — Vue Flow 画布 + 自定义节点 + 执行路径 Trace 高亮
+- 🔐 **RBAC 权限体系** — 6 角色 26 权限（15 个权限组），JWT 双 Token 认证（access 1h + refresh 7d），功能级 RBAC × 数据级 ACL 两层叠加
+- 📚 **知识库 + 向量检索** — PostgreSQL + pgvector，支持文档上传、自动分块、语义检索（中文问题自动翻译双语检索，提升英文知识命中）
+- 🧩 **可视化工作流编辑器** — Vue Flow 画布 + 自定义节点（含智能分类器、条件判断等逻辑节点）+ 执行路径 Trace 高亮
 - 💬 **多模态对话** — 文本 / PDF / Word / Excel / 图片 / 视频，附件作为上下文参与推理
 - 🔗 **第三方零代码接入** — 每个 Agent 独立 `chat_token`，支持 API 调用或 iframe 嵌入
-- 📈 **全链路可观测** — 执行 Trace / Span / Analytics 统计 / 实时监控面板
+- 📈 **全链路可观测** — 执行 Trace / Span / Analytics 统计 / 实时监控面板 / 审计日志
 
 ---
 
@@ -35,8 +39,9 @@
 | **前端** | Vue 3 · Vite · TypeScript · Ant Design Vue · Vue Flow · Pinia |
 | **数据库** | PostgreSQL 16 + pgvector · Redis 7 |
 | **LLM** | DeepSeek（Chat / Reasoner）· 通义千问 Qwen3.x（Chat / Vision，Token Plan 端点）· HappyHorse（视频生成）· 可扩展多提供商 |
-| **多媒体** | ffmpeg（视频抽帧/镜头检测）· PySceneDetect |
-| **部署** | systemd + Nginx + uvicorn（支持演进至 Docker / K8s） |
+| **多媒体** | ffmpeg（视频抽帧/镜头检测）· PySceneDetect · sentence-transformers（本地文本向量） |
+| **IM 集成** | lark-oapi（飞书长连接）· dingtalk-stream（钉钉 Stream 模式） |
+| **部署** | systemd + Nginx + uvicorn（云端）· launchd（本地常驻服务）（支持演进至 Docker / K8s） |
 
 ---
 
@@ -139,6 +144,12 @@ python run.py
 
 # 多模态知识库处理任务 Worker（图片/视频 AI 分析必需，单独进程）
 python -m app.multimodal.workers.task_worker
+
+# 文本向量服务（知识库/记忆检索必需，Python 3.9 独立环境）
+python embedding_service.py   # :8001，详见 docs/服务启动与运维手册.md
+
+# IM 渠道消息泵（飞书/钉钉机器人必需，单独进程）
+python -m app.workers.channel_worker
 ```
 
 ### 5. 启动前端
@@ -167,13 +178,16 @@ ai-agent-platform/
 ├── app/                        # 后端应用
 │   ├── main.py                 # FastAPI 入口
 │   ├── core/                   # 配置管理
-│   ├── api/v1/endpoints/       # API 路由（14 个模块）
+│   ├── api/v1/endpoints/       # API 路由（19 个模块）
 │   ├── models/                 # SQLAlchemy 数据模型
 │   ├── schemas/                # Pydantic 请求/响应模型
 │   ├── repositories/           # 数据访问层
-│   ├── services/               # 业务逻辑层
+│   ├── services/               # 业务逻辑层（含资源 ACL）
 │   ├── runtime/                # Agent Runtime（LangGraph 执行引擎）
 │   ├── workflows/              # 工作流定义与执行
+│   ├── channels/               # IM 渠道适配器（飞书/钉钉）与注册表
+│   ├── employee/               # AI 员工运行时（Supervisor/DAG/调度器）
+│   ├── workers/                # 渠道消息泵 worker
 │   ├── knowledge/              # 知识库解析与向量化
 │   ├── multimodal/             # 多模态知识库（素材/处理任务/视觉分析/多模态检索）
 │   ├── memory/                 # 记忆管理
@@ -209,33 +223,36 @@ ai-agent-platform/
 
 | 中心 | 说明 |
 | --- | --- |
-| **Agent Center** | Agent CRUD、版本管理、工具/知识/工作流绑定、独立 chat_token |
-| **Workflow Center** | LangGraph 工作流定义、可视化编辑、执行路径追踪 |
+| **Agent Center** | Agent CRUD、版本管理、工具/知识/工作流绑定、独立 chat_token、所有权与授权（数据级 ACL） |
+| **Workflow Center** | LangGraph 工作流定义、可视化编辑、逻辑节点（智能分类器/条件分支）、执行路径追踪 |
 | **Model Center** | 多 LLM 提供商管理、模型配置、动态切换；视觉自动回退、图片/视频生成回退链 |
-| **Knowledge Center** | 文档上传、自动分块、pgvector 语义检索、置信度过滤 |
+| **Knowledge Center** | 文档上传、自动分块、pgvector 语义检索（查询自动翻译双语检索）、置信度过滤 |
 | **Multimodal Center** | 多模态知识库：素材上传、处理任务队列、AI 分析审核、向量索引、三种模式检索 |
 | **Memory Center** | 长期记忆存储与召回，按 user_id 隔离 |
-| **Tool Center** | 工具注册、Schema 化、权限检查（内置 8 个业务工具） |
-| **Human Center** | 转人工任务、工单分配、处理闭环 |
-| **Permission Center** | RBAC（6 角色 19 权限）、JWT 双 Token |
+| **Tool Center** | 工具注册、Schema 化、权限检查（内置 9 个业务工具）、执行审批门禁（敏感工具人工批准） |
+| **Human Center** | 转人工任务、工单分配、处理闭环、工具执行审批 |
+| **Permission Center** | RBAC（6 角色 26 权限）、JWT 双 Token、资源所有权与授权（用户级 + 角色级） |
 | **Analytics Center** | 执行 Trace、Span 级追踪、统计面板 |
+| **Channel Center** | 飞书 / 钉钉 IM 渠道接入（Stream 长连接）、Agent 与 AI 员工双绑定、多渠道并存 |
+| **AI Employee Center** | 多 Agent 协同：Supervisor 动态调度 / DAG 编排、任务执行、决策日志、工作台可视化 |
 
 ### 前端 — 管理后台页面
 
 | 页面 | 功能 |
 | --- | --- |
 | Dashboard | 系统总览、关键指标 |
-| Agents | Agent 管理、配置抽屉（模型/工具/知识/工作流绑定） |
-| Workflow Editor | Vue Flow 可视化工作流编辑 + Trace 高亮 |
+| Agents | Agent 管理、配置抽屉（模型/工具/知识/工作流绑定）、成员授权弹窗 |
+| Workflow Editor | Vue Flow 可视化工作流编辑（含逻辑节点）+ Trace 高亮 |
 | Knowledge | 知识库管理、文档同步 |
 | 多模态知识库 | 知识库卡片 / 素材库（网格+筛选+回收站）/ 素材详情（AI 分析+标签+时间线）/ 拖拽上传 / 处理任务监控（5s 自动刷新）/ 多模态检索（文本·以图搜图·融合） |
 | Models | 模型提供商与配置管理 |
+| AI 员工 | 团队配置（Supervisor/DAG、成员编排）、发布管理、工作台（任务执行 + 决策日志可视化）、IM 渠道绑定 |
 | Conversations | 对话历史查看 |
 | Memories | 记忆管理 |
-| Tasks | 人工任务工单 |
+| Tasks | 人工任务工单 + 工具执行审批 |
 | Analytics | 执行分析与 Trace |
 | Monitoring | 系统监控（DB/Redis/LLM 健康） |
-| Users | 用户与角色管理 |
+| Users | 用户与角色管理（26 权限可视分配） |
 
 ### 内置业务工具
 
@@ -249,6 +266,61 @@ ai-agent-platform/
 | `multimodal_kb_search` | 多模态知识库检索（文本向量 / 以图搜图 / 图文融合，跨知识库合并去重） |
 | `image_generation` | AI 图片生成（文生图 T2I / 图生图 I2I，最多 3 张参考图） |
 | `video_generation` | AI 视频生成（文生视频 T2V / 图生视频 I2V 首帧驱动） |
+| `ocr_recognition` | 图片文字识别（PDF 扫描件 / 图片附件 OCR） |
+
+> 全部工具支持「执行审批门禁」标记——开启后执行前需管理员在人工中心批准。
+
+---
+
+## 🤝 AI 员工（多 Agent 协同）
+
+把多个 Agent 编成一个「数字员工团队」，由 Supervisor 或 DAG 统一调度：
+
+- **Supervisor 模式（动态）**：调度大脑按场景分析，逐轮派发成员 Agent（`dispatch_agent` 单发 / `dispatch_parallel` 并行）、汇总结果、判定完成；内置派发效率原则（可并行必须并行、信息足够立即收尾）
+- **DAG 模式（静态）**：按 `depends_on` 依赖拓扑调度，无依赖的成员并行执行（asyncio.gather）
+- **决策防御三层**：JSON 解析 → Schema 校验 → LLM 修复，杜绝调度输出导致的流程崩溃
+- **工作台可视化**：任务步骤、每轮决策（派发理由、动作）、成员产出全部落库可查
+- **IM 落地**：飞书/钉钉渠道可直接绑定 AI 员工团队——用户发消息，Supervisor 分析场景派发对应成员，用户收到回执 + 进度推送 + 最终汇总
+
+---
+
+## 💬 IM 渠道集成
+
+用户在飞书 / 钉钉里直接与 Agent 或 AI 员工团队对话，无需登录本系统：
+
+| 能力 | 说明 |
+| --- | --- |
+| 双平台 | 飞书（WebSocket 长连接）+ 钉钉（Stream 模式），均免公网回调、免 IP 白名单 |
+| 双绑定 | 渠道可绑定单 Agent（标准工作流）或 AI 员工团队（多 Agent 协同） |
+| 多渠道并存 | 同一 Agent 可同时挂飞书 + 钉钉机器人，各自独立连接 |
+| 体验设计 | 用户消息秒回执 → AI 员工任务进度推送（每完成一个成员）→ 最终结果；知识缺失自动建转人工工单 |
+| 数据级隔离 | 渠道绑定是管理员职能（channel:manage），与 Agent 所有权体系独立 |
+
+配置步骤与排障实录见 [IM 渠道集成指南](docs/IM渠道集成指南.md)。
+
+---
+
+## 🛡️ 工具执行审批门禁
+
+对接真实业务工具（改订单、退款等写操作）时的安全机制：
+
+1. 工具中心对任意工具开启「审批门禁」开关（默认关闭，查询类工具不受影响）
+2. 开启后，Agent 调用该工具时自动挂起，创建审批单（含参数快照、Agent/会话/追踪上下文）
+3. 管理员在「人工中心 → 工具执行审批」批准或拒绝（拒绝需填理由）
+4. 批准 → 工具执行、结果回传 LLM；拒绝 / 超时（默认 30 分钟）→ 拒绝原因回传 LLM 组织得体婉拒话术
+5. 全程落审计日志；挂起不阻塞其他消息处理
+
+---
+
+## 🔑 资源所有权与授权
+
+Agent 与 AI 员工的数据级隔离（在功能级 RBAC 之上叠加）：
+
+- **谁创建谁拥有**：创建者自动获得该资源的完整管理权，其他用户默认不可见（列表过滤 + 详情 404 隐藏存在性）
+- **三级授权**：对话（chat）⊂ 查看（view）⊂ 管理（manage）
+- **双主体授权**：按用户逐个授权（创建者/管理员可操作）；按角色批量授权（仅超级管理员，角色成员动态进出自动生效）
+- **管理员旁路**：超级管理员与 admin 角色不受限；存量无主资源保持公共可见
+- **授权入口**：Agent 列表「授权」按钮弹窗；AI 员工配置抽屉内区块
 
 ---
 
@@ -369,6 +441,10 @@ python scripts/check_timezone.py
 | [API 参考文档（中文）](docs/API_REFERENCE_ZH.md) | 全量 API 接口说明（84 接口，含权限标注） |
 | [API 文档（HTML 版）](docs/API_REFERENCE_ZH.html) | 交互式 API 文档（搜索/深色模式/侧边导航） |
 | [第三方集成指南](docs/THIRD_PARTY_AGENT_INTEGRATION.md) | 第三方系统对接 Agent 的场景化接入指南 |
+| [IM 渠道集成指南](docs/IM渠道集成指南.md) | 飞书/钉钉接入配置、多 Agent 协同、排障实录 |
+| [服务启动与运维手册](docs/服务启动与运维手册.md) | 本地/云端全部服务启动命令、健康检查、故障排查表 |
+| [项目评估与迭代路线](docs/项目评估与迭代路线报告.md) | 对标市场需求的优势/短板分析与迭代路线图 |
+| [所有权与授权需求文档](docs/Agent与AI员工所有权与授权需求文档.md) | 数据级隔离机制的设计与规则 |
 | [部署指南](docs/DEPLOYMENT_GUIDE.md) | 无 Docker/K8s 的手动部署文档（systemd + Nginx） |
 
 ---
@@ -383,11 +459,16 @@ Nginx (:80/:443)
   ├── /api/*     → uvicorn :8000
   └── /docs /chat → uvicorn :8000
 
-systemd: ai-agent.service
-  └── uvicorn app.main:app --workers 2~4
+systemd:
+  ├── ai-agent-platform       uvicorn app.main:app --workers 2~4
+  ├── ai-agent-mmworker       多模态素材处理 Worker
+  ├── ai-agent-embedding      文本向量服务 (:8001)
+  └── ai-agent-channel-worker IM 渠道消息泵（飞书/钉钉长连接）
 
 PostgreSQL 16 + pgvector  |  Redis 7
 ```
+
+> ⚠️ IM 渠道消息泵同一应用只能运行一端（本地或云端）：飞书多连接消息随机路由、钉钉新连接会踢旧连接。
 
 快速部署命令：
 
@@ -425,9 +506,9 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
 - **意图识别**：LLM 意图分类（LLM 不可用时关键词兜底），覆盖商品咨询/订单售后/知识检索/图片生成/视频生成等 10 类意图
-- **知识检索**：pgvector 语义搜索 + 置信度过滤
+- **知识检索**：pgvector 语义搜索（中文问题自动翻译双语检索）+ 置信度过滤
 - **记忆召回**：按 user_id 检索相关长期记忆
-- **工具调用**：Schema 化工具执行（带权限检查）；生图/生视频意图走专用编排流程（知识库素材作为参考图/首帧）
+- **工具调用**：Schema 化工具执行（带权限检查 + 审批门禁）；生图/生视频意图走专用编排流程（知识库素材作为参考图/首帧）
 - **LLM 推理**：组合上下文生成回答；图片附件自动切换多模态模型
 - **人工兜底**：置信度不足时创建工单转人工
 
