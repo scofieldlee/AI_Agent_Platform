@@ -32,6 +32,8 @@ class Agent(Base):
     agent_type: Mapped[str] = mapped_column(String(50), default="config")  # system, config, composite
     status: Mapped[str] = mapped_column(String(20), default="draft", index=True)  # draft, testing, published, running, suspended, archived
     version: Mapped[str] = mapped_column(String(20), default="0.1.0")
+    created_by: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True)  # owner; NULL = legacy public
     config: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)
     # config includes: system_prompt, model_policy, memory_config, etc.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

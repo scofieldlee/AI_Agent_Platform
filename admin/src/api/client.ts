@@ -182,7 +182,9 @@ export const toolsApi = {
   stats: () => client.get('/tools/stats'),
   detailStats: (name: string) => client.get(`/tools/${name}/stats`),
   execute: (name: string, parameters: Record<string, any>) =>
-    client.post(`/tools/${name}/execute`, { parameters }, { timeout: 180000 })
+    client.post(`/tools/${name}/execute`, { parameters }, { timeout: 180000 }),
+  setApproval: (name: string, data: { requires_approval: boolean; approval_timeout_minutes?: number }) =>
+    client.patch(`/tools/${name}/approval`, data)
 }
 
 // ===== Channels (IM integrations) =====
@@ -195,6 +197,24 @@ export const channelsApi = {
   update: (id: number, data: Record<string, any>) => client.put(`/channels/${id}`, data),
   remove: (id: number) => client.delete(`/channels/${id}`),
   test: (id: number) => client.post(`/channels/${id}/test`, {}, { timeout: 30000 })
+}
+
+// ===== Resource Shares (所有权与授权) =====
+export const resourceSharesApi = {
+  list: (resourceType: string, resourceId: number) =>
+    client.get(`/resources/${resourceType}/${resourceId}/shares`),
+  grant: (resourceType: string, resourceId: number,
+    data: { principal_type: 'user' | 'role'; identifier: string; permission: 'chat' | 'view' | 'manage' }) =>
+    client.post(`/resources/${resourceType}/${resourceId}/shares`, data),
+  revoke: (resourceType: string, resourceId: number, shareId: number) =>
+    client.delete(`/resources/${resourceType}/${resourceId}/shares/${shareId}`)
+}
+
+// ===== Tool Approvals (审批门禁) =====
+export const toolApprovalsApi = {
+  list: (status?: string) => client.get('/tool-approvals', { params: status ? { status } : {} }),
+  review: (id: number, data: { action: 'approved' | 'rejected'; comment?: string }) =>
+    client.post(`/tool-approvals/${id}/review`, data)
 }
 
 // ===== Workflow =====

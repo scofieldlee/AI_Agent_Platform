@@ -72,7 +72,8 @@ async def list_channels_endpoint(
     return ChannelListResponse(items=[ChannelResponse.from_channel(c) for c in channels])
 
 
-@router.post("", response_model=ChannelResponse)
+@router.post("", response_model=ChannelResponse,
+             dependencies=[Depends(require_permission("channel:manage"))])
 async def create_channel_endpoint(payload: ChannelCreate, db: AsyncSession = Depends(get_db)):
     if payload.channel_type not in SUPPORTED_CHANNEL_TYPES:
         raise HTTPException(
@@ -96,7 +97,8 @@ async def create_channel_endpoint(payload: ChannelCreate, db: AsyncSession = Dep
     return ChannelResponse.from_channel(channel)
 
 
-@router.put("/{channel_id}", response_model=ChannelResponse)
+@router.put("/{channel_id}", response_model=ChannelResponse,
+            dependencies=[Depends(require_permission("channel:manage"))])
 async def update_channel_endpoint(
     channel_id: int, payload: ChannelUpdate, db: AsyncSession = Depends(get_db)
 ):
@@ -135,7 +137,7 @@ async def update_channel_endpoint(
     return ChannelResponse.from_channel(channel)
 
 
-@router.delete("/{channel_id}")
+@router.delete("/{channel_id}", dependencies=[Depends(require_permission("channel:manage"))])
 async def delete_channel_endpoint(channel_id: int, db: AsyncSession = Depends(get_db)):
     channel = await get_channel(db, channel_id)
     if not channel:
@@ -144,7 +146,8 @@ async def delete_channel_endpoint(channel_id: int, db: AsyncSession = Depends(ge
     return {"deleted": True}
 
 
-@router.post("/{channel_id}/test", response_model=ChannelTestResponse)
+@router.post("/{channel_id}/test", response_model=ChannelTestResponse,
+             dependencies=[Depends(require_permission("channel:manage"))])
 async def test_channel_endpoint(channel_id: int, db: AsyncSession = Depends(get_db)):
     """Validate channel credentials against the IM platform."""
     channel = await get_channel(db, channel_id)

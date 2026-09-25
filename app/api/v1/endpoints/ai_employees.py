@@ -23,6 +23,25 @@ from app.repositories import employee_repo
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+async def _check_employee_visibility(
+    db: AsyncSession, user: User, employee_id: int, need: str = "view"
+):
+    """Data-level ACL check. 404 hides existence; 403 for insufficient level."""
+    from app.services.resource_acl import get_resource_permission
+    from app.models.ai_employee import AIEmployee
+    employee = await db.get(AIEmployee, employee_id)
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    perm = await get_resource_permission(db, user, "employee", employee_id, employee.created_by)
+    order = {"chat": 0, "view": 1, "manage": 2}
+    if perm is None or order.get(perm, -1) < order[need]:
+        if perm is None:
+            raise HTTPException(status_code=404, detail="Employee not found")
+        raise HTTPException(status_code=403, detail="无该 AI 员工的管理权限，请联系创建者授权")
+    return employee
+
+
+
 # --- Running task registry (process-level) ---
 _running_tasks: dict = {}
 MAX_CONCURRENT_TASKS = 10
@@ -33,18 +52,24 @@ MAX_CONCURRENT_TASKS = 10
 # ============================================================
 
 @router.get("", response_model=List[EmployeeResponse],
-            dependencies=[Depends(require_permission("agent:view"))])
+            dependencies=[Depends(require_permission("employee:view"))])
 async def list_employees_endpoint(
     status: Optional[str] = Query(None),
     keyword: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """List all AI employees."""
-    return await employee_service.list_employees(db, status=status, keyword=keyword)
+    """List AI employees visible to the current user (data-level ACL)."""
+    from app.services.resource_acl import visible_resource_ids
+    items = await employee_service.list_employees(db, status=status, keyword=keyword)
+    all_visible, visible_ids = await visible_resource_ids(
+        db, current_user, "employee", {e["id"]: e.get("created_by") for e in items}
+    )
+    return items if all_visible else [e for e in items if e["id"] in visible_ids]
 
 
 @router.post("", response_model=EmployeeResponse, status_code=201,
-             dependencies=[Depends(require_permission("agent:manage"))])
+             dependencies=[Depends(require_permission("employee:manage"))])
 async def create_employee_endpoint(
     data: EmployeeCreate,
     db: AsyncSession = Depends(get_db),
@@ -86,7 +111,7 @@ async def create_employee_endpoint(
 # ============================================================
 
 @router.get("/agents/selectable", response_model=List[SelectableAgentResponse],
-            dependencies=[Depends(require_permission("agent:view"))])
+            dependencies=[Depends(require_permission("employee:view"))])
 async def list_selectable_agents_endpoint(
     db: AsyncSession = Depends(get_db),
 ):
@@ -100,7 +125,7 @@ async def list_selectable_agents_endpoint(
 
 
 @router.get("/tasks", response_model=List[TaskListResponse],
-            dependencies=[Depends(require_permission("agent:view"))])
+            dependencies=[Depends(require_permission("employee:view"))])
 async def list_tasks_endpoint(
     status: Optional[str] = Query(None),
     employee_id: Optional[int] = Query(None),
@@ -119,7 +144,7 @@ async def list_tasks_endpoint(
 
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse,
-             dependencies=[Depends(require_permission("agent:view"))])
+             dependencies=[Depends(require_permission("employee:view"))])
 async def get_task_endpoint(
     task_id: int,
     db: AsyncSession = Depends(get_db),
@@ -132,7 +157,7 @@ async def get_task_endpoint(
 
 
 @router.post("/tasks/{task_id}/cancel",
-             dependencies=[Depends(require_permission("agent:view"))])
+             dependencies=[Depends(require_permission("employee:view"))])
 async def cancel_task_endpoint(
     task_id: int,
     db: AsyncSession = Depends(get_db),
@@ -168,7 +193,7 @@ async def cancel_task_endpoint(
 
 
 @router.post("/tasks/{task_id}/resume",
-             dependencies=[Depends(require_permission("agent:view"))])
+             dependencies=[Depends(require_permission("employee:view"))])
 async def resume_task_endpoint(
     task_id: int,
     payload: Optional[TaskResumeRequest] = None,
@@ -230,12 +255,14 @@ async def resume_task_endpoint(
 # ============================================================
 
 @router.get("/{employee_id}", response_model=EmployeeDetailResponse,
-            dependencies=[Depends(require_permission("agent:view"))])
+            dependencies=[Depends(require_permission("employee:view"))])
 async def get_employee_endpoint(
     employee_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Get employee detail with bindings."""
+    await _check_employee_visibility(db, current_user, employee_id, need="view")
     detail = await employee_service.get_employee_detail(db, employee_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -243,13 +270,15 @@ async def get_employee_endpoint(
 
 
 @router.put("/{employee_id}", response_model=EmployeeDetailResponse,
-            dependencies=[Depends(require_permission("agent:manage"))])
+            dependencies=[Depends(require_permission("employee:manage"))])
 async def update_employee_endpoint(
     employee_id: int,
     data: EmployeeUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update employee basic info."""
+    await _check_employee_visibility(db, current_user, employee_id, need="manage")
     try:
         await employee_service.update_employee(db, employee_id, data.model_dump(exclude_unset=True))
         await db.commit()
@@ -261,12 +290,14 @@ async def update_employee_endpoint(
 
 
 @router.delete("/{employee_id}",
-               dependencies=[Depends(require_permission("agent:manage"))])
+               dependencies=[Depends(require_permission("employee:manage"))])
 async def delete_employee_endpoint(
     employee_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Delete an employee (refused if running tasks exist)."""
+    await _check_employee_visibility(db, current_user, employee_id, need="manage")
     try:
         await employee_service.delete_employee(db, employee_id)
         await db.commit()
@@ -276,7 +307,7 @@ async def delete_employee_endpoint(
 
 
 @router.get("/{employee_id}/agents", response_model=List[AgentBindingResponse],
-            dependencies=[Depends(require_permission("agent:view"))])
+            dependencies=[Depends(require_permission("employee:view"))])
 async def get_bindings_endpoint(
     employee_id: int,
     db: AsyncSession = Depends(get_db),
@@ -289,7 +320,7 @@ async def get_bindings_endpoint(
 
 
 @router.put("/{employee_id}/agents",
-            dependencies=[Depends(require_permission("agent:manage"))])
+            dependencies=[Depends(require_permission("employee:manage"))])
 async def set_bindings_endpoint(
     employee_id: int,
     data: AgentBindingsUpdate,
@@ -318,11 +349,13 @@ async def set_bindings_endpoint(
 
 
 @router.post("/{employee_id}/publish", response_model=EmployeeDetailResponse,
-             dependencies=[Depends(require_permission("agent:manage"))])
+             dependencies=[Depends(require_permission("employee:manage"))])
 async def publish_employee_endpoint(
     employee_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _check_employee_visibility(db, current_user, employee_id, need="manage")
     """Publish an employee after validation."""
     try:
         await employee_service.publish_employee(db, employee_id)
@@ -335,11 +368,13 @@ async def publish_employee_endpoint(
 
 
 @router.post("/{employee_id}/disable", response_model=EmployeeDetailResponse,
-             dependencies=[Depends(require_permission("agent:manage"))])
+             dependencies=[Depends(require_permission("employee:manage"))])
 async def disable_employee_endpoint(
     employee_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _check_employee_visibility(db, current_user, employee_id, need="manage")
     """Disable a published employee."""
     try:
         await employee_service.disable_employee(db, employee_id)
@@ -362,6 +397,7 @@ async def execute_employee_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await _check_employee_visibility(db, current_user, employee_id, need="view")
     """Create a task and launch async execution."""
     # Concurrency guard
     if len(_running_tasks) >= MAX_CONCURRENT_TASKS:

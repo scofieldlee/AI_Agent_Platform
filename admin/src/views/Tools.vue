@@ -64,6 +64,13 @@
           <template v-if="column.key === 'last_executed_24h'">
             {{ record.last_executed_24h ? formatTime(record.last_executed_24h, 'minute') : '24h 内无调用' }}
           </template>
+          <template v-if="column.key === 'requires_approval'">
+            <a-tooltip title="开启后，该工具执行前需管理员在「人工中心」批准">
+              <a-switch :checked="!!record.requires_approval" size="small"
+                :loading="approvingTool === record.name"
+                @change="(v: any) => toggleApproval(record, v)" />
+            </a-tooltip>
+          </template>
           <template v-if="column.key === 'action'">
             <a-button size="small" type="link" @click="openDetail(record)">详情</a-button>
           </template>
@@ -224,6 +231,7 @@ const columns = [
   { title: '工具名称', key: 'name', width: 200 },
   { title: '类型', key: 'tool_type', width: 90 },
   { title: '工具介绍', key: 'description', ellipsis: true },
+  { title: '审批门禁', key: 'requires_approval', width: 90, align: 'center' as const },
   { title: '24h 请求', key: 'total_24h', width: 90, align: 'center' as const },
   { title: '24h 成功', key: 'success_24h', width: 110, align: 'center' as const },
   { title: '成功率', key: 'success_rate_24h', width: 90, align: 'center' as const },
@@ -263,6 +271,22 @@ async function fetchTools() {
   } catch {
     tools.value = []
   } finally { loading.value = false }
+}
+
+const approvingTool = ref<string | null>(null)
+async function toggleApproval(record: any, checked: any) {
+  approvingTool.value = record.name
+  try {
+    await toolsApi.setApproval(record.name, { requires_approval: !!checked })
+    record.requires_approval = !!checked
+    message.success(
+      checked
+        ? `已开启「${record.name}」审批门禁：执行前需管理员批准`
+        : `已关闭「${record.name}」审批门禁`
+    )
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || '设置失败')
+  } finally { approvingTool.value = null }
 }
 
 async function openDetail(record: any) {

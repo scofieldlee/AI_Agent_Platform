@@ -572,9 +572,109 @@ async def tool_node(state: AgentState, node_config: Optional[Dict[str, Any]] = N
         registry = get_registry()
         executor = ToolExecutor()
 
+        # --- Approval gate helpers (shared by dedicated flows and run_tool) ---
+        async def _get_tool_meta(tool_name: str):
+            """Fetch (requires_approval, timeout_minutes) from the tools table."""
+            from sqlalchemy import select as _select
+            from app.models.tool import Tool as ToolModel
+            from app.database.session import async_session_factory
+            try:
+                async with async_session_factory() as db:
+                    row = (await db.execute(
+                        _select(ToolModel).where(ToolModel.code == tool_name)
+                    )).scalar_one_or_none()
+                    if row:
+                        return bool(row.requires_approval), int(row.approval_timeout_minutes or 30)
+            except Exception as e:
+                logger.warning(f"Tool meta lookup failed for {tool_name}: {e}")
+            return False, 30
+
+        async def _wait_for_approval(
+            approval_id: int, timeout_minutes: int, tool_name: str
+        ) -> str:
+            """Poll the approval until reviewed/expired. Returns final status."""
+            import asyncio as _asyncio
+            from app.database.session import async_session_factory
+            from app.repositories import tool_approval_repo
+            from datetime import timedelta
+            from app.core.timeutils import now as _now
+
+            deadline = _now() + timedelta(minutes=timeout_minutes)
+            while _now() < deadline:
+                await _asyncio.sleep(5)
+                try:
+                    async with async_session_factory() as db:
+                        approval = await tool_approval_repo.get_approval(db, approval_id)
+                        if approval and approval.status != "pending":
+                            await db.commit()
+                            return approval.status
+                        if approval:
+                            await db.commit()
+                except Exception as e:
+                    logger.warning(f"Approval poll failed (id={approval_id}): {e}")
+            # Timeout -> expire
+            try:
+                async with async_session_factory() as db:
+                    approval = await tool_approval_repo.get_approval(db, approval_id)
+                    if approval and approval.status == "pending":
+                        await tool_approval_repo.expire_if_stale(db, approval, timeout_minutes=0)
+                        await db.commit()
+            except Exception:
+                pass
+            logger.warning(f"Tool approval {approval_id} timed out ({tool_name})")
+            return "expired"
+
+        async def ensure_tool_approval(tool_name: str):
+            """Approval gate. Returns None when execution may proceed, or a
+            refusal tool-result dict when not approved."""
+            needs_approval, approval_timeout = await _get_tool_meta(tool_name)
+            if not needs_approval:
+                return None
+
+            from app.database.session import async_session_factory
+            from app.repositories import tool_approval_repo
+
+            async with async_session_factory() as db:
+                approval = await tool_approval_repo.create_approval(
+                    db,
+                    tool_name=tool_name,
+                    params={"query": user_input},
+                    agent_id=state.get("agent_id"),
+                    conversation_id=state.get("conversation_id"),
+                    trace_id=state.get("trace_id"),
+                    requester=str(state.get("user_id") or ""),
+                )
+                await db.commit()
+                approval_id = approval.id
+            logger.info(
+                f"Tool {tool_name} requires approval | approval_id={approval_id} "
+                f"timeout={approval_timeout}min | waiting for human review"
+            )
+            outcome = await _wait_for_approval(approval_id, approval_timeout, tool_name)
+            if outcome == "approved":
+                logger.info(f"Tool {tool_name} approved (approval_id={approval_id}), executing")
+                return None
+            logger.info(
+                f"Tool {tool_name} NOT approved (status={outcome}) | returning refusal"
+            )
+            return {
+                "tool": tool_name,
+                "approval_status": outcome,
+                "message": (
+                    f"该操作涉及敏感变更，已提交人工审批但未获批准"
+                    f"（状态：{outcome}）。请告知用户：操作未被批准，"
+                    f"如确有需要请联系人工客服处理。"
+                ),
+                "total": 0,
+            }
+
         # Image generation intent: dedicated flow — KB asset retrieval
         # (reference images) + user attachments + text prompt → I2I/T2I.
         if intent == "image_generation" and registry.has("image_generation"):
+            refusal = await ensure_tool_approval("image_generation")
+            if refusal:
+                logger.info("Image generation blocked by approval gate")
+                return {"tool_results": [refusal]}
             tool_results = await _run_image_generation_flow(
                 state, user_input, executor, registry,
             )
@@ -588,6 +688,10 @@ async def tool_node(state: AgentState, node_config: Optional[Dict[str, Any]] = N
         # user image attachment as first frame + text prompt → I2V/T2V.
         # Long-running (upstream async task, usually 1-5 minutes).
         if intent == "video_generation" and registry.has("video_generation"):
+            refusal = await ensure_tool_approval("video_generation")
+            if refusal:
+                logger.info("Video generation blocked by approval gate")
+                return {"tool_results": [refusal]}
             tool_results = await _run_video_generation_flow(
                 state, user_input, executor, registry,
             )
@@ -603,6 +707,12 @@ async def tool_node(state: AgentState, node_config: Optional[Dict[str, Any]] = N
             if not registry.has(tool_name):
                 logger.debug(f"Tool {tool_name} not registered, skipping")
                 return None
+
+            # --- Approval gate: pause sensitive tools until human review ---
+            refusal = await ensure_tool_approval(tool_name)
+            if refusal:
+                return refusal
+
 
             # Build parameters based on tool type
             if tool_name == "order_query":

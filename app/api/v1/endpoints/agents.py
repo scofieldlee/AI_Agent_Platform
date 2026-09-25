@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
-from app.auth.dependencies import require_permission
+from app.auth.dependencies import require_permission, get_current_user
+from app.models.user import User
 from app.core.audit import audit
 from app.schemas.agent import (
     AgentCreate, AgentUpdate, AgentResponse, AgentDetailResponse,
@@ -20,16 +21,42 @@ from app.repositories.agent_repo import (
 router = APIRouter()
 
 
+async def _check_agent_visibility(
+    db: AsyncSession, user: User, agent_id: int, need: str = "view"
+):
+    """Data-level ACL check. 404 hides existence; 403 for insufficient level."""
+    from app.services.resource_acl import get_resource_permission
+    agent = await get_agent(db, agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    perm = await get_resource_permission(db, user, "agent", agent_id, agent.created_by)
+    order = {"chat": 0, "view": 1, "manage": 2}
+    if perm is None or order.get(perm, -1) < order[need]:
+        if perm is None:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        raise HTTPException(status_code=403, detail="无该 Agent 的管理权限，请联系创建者授权")
+    return agent
+
+
 @router.get("", response_model=List[AgentResponse], dependencies=[Depends(require_permission("agent:view"))])
-async def list_agents_endpoint(db: AsyncSession = Depends(get_db)):
-    """List all agents."""
-    return await list_agents(db)
+async def list_agents_endpoint(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """List agents visible to the current user (data-level ACL)."""
+    from app.services.resource_acl import visible_resource_ids
+    agents = await list_agents(db)
+    all_visible, visible_ids = await visible_resource_ids(
+        db, current_user, "agent", {a["id"]: a.get("created_by") for a in agents}
+    )
+    if all_visible:
+        return agents
+    filtered = [a for a in agents if a["id"] in visible_ids]
+    # annotate creator name for management view
+    return filtered
 
 
 @router.post("", response_model=AgentResponse, status_code=201, dependencies=[Depends(require_permission("agent:manage"))])
 @audit(action="create", resource_type="agent", resource_name=lambda ctx: getattr(ctx.get("data"), "name", None))
-async def create_agent_endpoint(data: AgentCreate, db: AsyncSession = Depends(get_db)):
-    """Create a new agent."""
+async def create_agent_endpoint(data: AgentCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Create a new agent (creator becomes owner)."""
     agent = await create_agent(
         db,
         name=data.name,
@@ -38,22 +65,22 @@ async def create_agent_endpoint(data: AgentCreate, db: AsyncSession = Depends(ge
         agent_type=data.agent_type,
         config=data.config,
     )
+    agent.created_by = current_user.id
     await db.commit()
     return agent
 
 
 @router.get("/{agent_id}", response_model=AgentResponse, dependencies=[Depends(require_permission("agent:view"))])
-async def get_agent_endpoint(agent_id: int, db: AsyncSession = Depends(get_db)):
-    """Get agent by ID."""
-    agent = await get_agent(db, agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+async def get_agent_endpoint(agent_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Get agent by ID (visibility-checked)."""
+    agent = await _check_agent_visibility(db, current_user, agent_id, need="view")
     return agent
 
 
 @router.get("/{agent_id}/detail", response_model=AgentDetailResponse, dependencies=[Depends(require_permission("agent:view"))])
-async def get_agent_detail_endpoint(agent_id: int, db: AsyncSession = Depends(get_db)):
+async def get_agent_detail_endpoint(agent_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Get agent detail with tool bindings, knowledge bindings, and version history."""
+    await _check_agent_visibility(db, current_user, agent_id, need="view")
     detail = await get_agent_detail(db, agent_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -85,6 +112,7 @@ async def get_agent_detail_endpoint(agent_id: int, db: AsyncSession = Depends(ge
 async def update_agent_endpoint(
     agent_id: int,
     data: AgentUpdate,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Update an agent's configuration.
@@ -92,9 +120,7 @@ async def update_agent_endpoint(
     Updates name, description, status, config, or is_active.
     Automatically creates a version snapshot when config changes.
     """
-    agent = await get_agent(db, agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await _check_agent_visibility(db, current_user, agent_id, need="manage")
 
     updates = data.model_dump(exclude_unset=True)
 
@@ -121,14 +147,12 @@ async def update_agent_endpoint(
     get_resource=lambda db, agent_id: get_agent(db, agent_id),
     resource_name_attr="name",
 )
-async def delete_agent_endpoint(agent_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_agent_endpoint(agent_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Archive (soft-delete) an agent.
 
     Published agents cannot be deleted to prevent breaking live conversations.
     """
-    agent = await get_agent(db, agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await _check_agent_visibility(db, current_user, agent_id, need="manage")
 
     if agent.status == "published":
         raise HTTPException(
@@ -146,11 +170,10 @@ async def set_tool_bindings_endpoint(
     agent_id: int,
     data: ToolBindingRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Set (replace) tool bindings for an agent."""
-    agent = await get_agent(db, agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await _check_agent_visibility(db, current_user, agent_id, need="manage")
 
     await set_tool_bindings(db, agent_id, data.tool_names)
     await db.commit()
@@ -162,11 +185,10 @@ async def set_knowledge_bindings_endpoint(
     agent_id: int,
     data: KnowledgeBindingRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Set (replace) knowledge base bindings for an agent."""
-    agent = await get_agent(db, agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await _check_agent_visibility(db, current_user, agent_id, need="manage")
 
     await set_knowledge_bindings(db, agent_id, data.knowledge_base_ids)
     await db.commit()
@@ -178,15 +200,14 @@ async def set_workflow_bindings_endpoint(
     agent_id: int,
     data: WorkflowBindingRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Set (replace) workflow bindings for an agent.
 
     The first workflow_id becomes the primary workflow used by the runtime.
     Empty list unbinds all workflows (agent falls back to the global default).
     """
-    agent = await get_agent(db, agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await _check_agent_visibility(db, current_user, agent_id, need="manage")
 
     # Validate that all workflow IDs exist
     if data.workflow_ids:
@@ -214,14 +235,13 @@ async def set_workflow_bindings_endpoint(
 async def regenerate_token_endpoint(
     agent_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Regenerate the chat_token for an agent.
 
     The old URL will stop working immediately.
     """
-    agent = await get_agent(db, agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await _check_agent_visibility(db, current_user, agent_id, need="manage")
 
     new_token = await regenerate_chat_token(db, agent)
     await db.commit()

@@ -46,6 +46,44 @@
       </a-col>
     </a-row>
 
+    <!-- Tool Approval Gate -->
+    <a-card title="工具执行审批" style="margin-bottom: 16px;">
+      <template #extra>
+        <a-button size="small" @click="fetchApprovals">
+          <ReloadOutlined /> 刷新
+        </a-button>
+      </template>
+      <a-alert
+        v-if="approvals.length === 0"
+        type="info"
+        show-icon
+        message="暂无待审批的工具执行请求"
+        style="margin-bottom: 4px;"
+      />
+      <a-table v-else :columns="approvalColumns" :data-source="approvals" row-key="id" size="small" :pagination="false">
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'tool_name'">
+            <code>{{ record.tool_name }}</code>
+          </template>
+          <template v-if="column.key === 'params'">
+            <code style="font-size: 11px; opacity: 0.75;">{{ JSON.stringify(record.params).substring(0, 80) }}</code>
+          </template>
+          <template v-if="column.key === 'requester'">
+            {{ record.requester || '—' }}
+          </template>
+          <template v-if="column.key === 'created_at'">
+            {{ formatDate(record.created_at) }}
+          </template>
+          <template v-if="column.key === 'action'">
+            <a-space>
+              <a-button size="small" type="primary" @click="reviewApproval(record, 'approved')">批准</a-button>
+              <a-button size="small" danger @click="openReject(record)">拒绝</a-button>
+            </a-space>
+          </template>
+        </template>
+      </a-table>
+    </a-card>
+
     <!-- Task Table -->
     <a-card title="工单列表">
       <a-table :columns="columns" :data-source="tasks" :loading="loading" row-key="id"
@@ -130,9 +168,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { message } from 'ant-design-vue'
-import { tasksApi } from '@/api/client'
+import { ref, reactive, onMounted, h } from 'vue'
+import { message, Modal, Input as AInput } from 'ant-design-vue'
+import { ReloadOutlined } from '@ant-design/icons-vue'
+import { tasksApi, toolApprovalsApi } from '@/api/client'
 import { formatTime } from '@/utils/time'
 
 const loading = ref(false)
@@ -215,5 +254,53 @@ async function doResolve() {
   } finally { actionLoading.value = false }
 }
 
-onMounted(() => { fetchTasks(); fetchStats() })
+onMounted(() => { fetchTasks(); fetchStats(); fetchApprovals() })
+
+// ===== 工具执行审批 =====
+const approvals = ref<any[]>([])
+const approvalColumns = [
+  { title: 'ID', key: 'id', width: 60 },
+  { title: '工具', key: 'tool_name', width: 140 },
+  { title: '参数', key: 'params', ellipsis: true },
+  { title: '发起方', key: 'requester', width: 140 },
+  { title: '时间', key: 'created_at', width: 150 },
+  { title: '操作', key: 'action', width: 140 },
+]
+
+async function fetchApprovals() {
+  try {
+    const res = await toolApprovalsApi.list('pending')
+    approvals.value = res.data.items || []
+  } catch {
+    approvals.value = []
+  }
+}
+
+async function reviewApproval(record: any, action: 'approved' | 'rejected', comment?: string) {
+  try {
+    await toolApprovalsApi.review(record.id, { action, comment })
+    message.success(action === 'approved' ? '已批准，工具将继续执行' : '已拒绝该工具执行')
+    await fetchApprovals()
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || '操作失败')
+  }
+}
+
+function openReject(record: any) {
+  let reason = ''
+  Modal.confirm({
+    title: `拒绝工具执行：${record.tool_name}`,
+    content: () => h('div', { style: 'margin-top: 8px;' }, [
+      h('p', { style: 'font-size: 12px; color: #666; margin-bottom: 8px;' },
+        '拒绝原因将随结果回传给 Agent（用于组织回复话术）'),
+      h(AInput, {
+        placeholder: '拒绝原因（选填）',
+        onChange: (e: any) => { reason = e.target.value }
+      })
+    ]),
+    okText: '确认拒绝',
+    okType: 'danger',
+    onOk: () => reviewApproval(record, 'rejected', reason || undefined)
+  })
+}
 </script>

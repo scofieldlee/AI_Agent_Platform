@@ -37,13 +37,44 @@ async def list_tools_endpoint():
 @router.get("/stats", response_model=List[ToolStatsResponse])
 async def list_tools_stats_endpoint(db: AsyncSession = Depends(get_db)):
     """List all registered tools with 24h execution statistics."""
+    from sqlalchemy import select
+    from app.models.tool import Tool as ToolModel
+
     registry = get_registry()
     stats = await get_tool_stats(db, since=now() - timedelta(hours=24))
+    # Approval-gate flags live on the tools table rows
+    rows = (await db.execute(select(ToolModel))).scalars().all()
+    flags = {r.name: bool(r.requires_approval) for r in rows}
+
     items = []
     for t in registry.list_tools():
         s = stats.get(t.name, {})
-        items.append(ToolStatsResponse(**t.to_dict(), **s))
+        items.append(ToolStatsResponse(
+            **t.to_dict(), **s,
+            requires_approval=flags.get(t.name, False),
+        ))
     return items
+
+
+@router.patch("/{tool_name}/approval", dependencies=[Depends(require_permission("tool:manage"))])
+async def set_tool_approval_endpoint(
+    tool_name: str,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Toggle the approval gate for a tool (and its timeout)."""
+    tool_row = await get_tool_by_name(db, tool_name)
+    if not tool_row:
+        raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
+    tool_row.requires_approval = bool(payload.get("requires_approval", False))
+    if "approval_timeout_minutes" in payload:
+        tool_row.approval_timeout_minutes = max(1, int(payload["approval_timeout_minutes"] or 30))
+    await db.commit()
+    return {
+        "tool": tool_name,
+        "requires_approval": tool_row.requires_approval,
+        "approval_timeout_minutes": tool_row.approval_timeout_minutes,
+    }
 
 
 @router.get("/{tool_name}/stats", response_model=ToolDetailResponse)

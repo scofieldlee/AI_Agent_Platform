@@ -34,6 +34,10 @@
           <template v-if="column.key === 'agent_type'">
             {{ typeLabel(record.agent_type) }}
           </template>
+          <template v-if="column.key === 'created_by_name'">
+            <span v-if="record.created_by_name">{{ record.created_by_name }}</span>
+            <a-tag v-else color="default" style="font-size: 11px;">公共</a-tag>
+          </template>
           <template v-if="column.key === 'version'">
             <a-tag color="blue">v{{ record.version }}</a-tag>
           </template>
@@ -68,6 +72,9 @@
               </a-button>
               <a-button type="link" size="small" @click="openConfigDrawer(record)">
                 <EditOutlined /> 配置
+              </a-button>
+              <a-button type="link" size="small" @click="openShareModal(record)">
+                <ShareAltOutlined /> 授权
               </a-button>
               <a-popconfirm
                 v-if="record.status !== 'published'"
@@ -519,6 +526,22 @@
       </template>
     </a-drawer>
 
+    <!-- Share Modal -->
+    <a-modal
+      v-model:open="shareModalOpen"
+      :title="shareModalAgent ? `成员授权 — ${shareModalAgent.name}` : '成员授权'"
+      width="680px"
+      :footer="null"
+      :destroy-on-close="true"
+    >
+      <ResourceShareSection
+        v-if="shareModalOpen && shareModalAgent"
+        resource-type="agent"
+        :resource-id="shareModalAgent.id"
+        resource-label="Agent"
+      />
+    </a-modal>
+
     <!-- Test Chat Modal -->
     <a-modal
       v-model:open="testModalVisible"
@@ -601,10 +624,11 @@ import {
   PaperClipOutlined, ApartmentOutlined,
   ExclamationCircleOutlined,
   LinkOutlined, CopyOutlined,
-  CustomerServiceOutlined,
+  CustomerServiceOutlined, ShareAltOutlined,
 } from '@ant-design/icons-vue'
 import { agentsApi, toolsApi, knowledgeApi, modelsApi, workflowApi, channelsApi } from '@/api/client'
 import { formatTime } from '@/utils/time'
+import ResourceShareSection from '@/components/ResourceShareSection.vue'
 
 // --- Agent list ---
 const loading = ref(false)
@@ -613,11 +637,12 @@ const columns = [
   { title: 'Agent', key: 'name', width: 250 },
   { title: '类型', key: 'agent_type', width: 100 },
   { title: '状态', key: 'status', width: 100 },
+  { title: '创建者', key: 'created_by_name', width: 110 },
   { title: '工作流', key: 'workflow', width: 160 },
   { title: '版本', key: 'version', width: 80 },
   { title: '启用', key: 'is_active', width: 80 },
   { title: '对话链接', key: 'chat_link', width: 180 },
-  { title: '操作', key: 'action', width: 200 },
+  { title: '操作', key: 'action', width: 250 },
 ]
 
 // --- Drawer ---
@@ -786,6 +811,14 @@ function openTestModal(agent: any) {
   testMessages.value = []
   testInput.value = ''
   testModalVisible.value = true
+}
+
+// --- 成员授权弹窗 ---
+const shareModalOpen = ref(false)
+const shareModalAgent = ref<any>(null)
+function openShareModal(agent: any) {
+  shareModalAgent.value = agent
+  shareModalOpen.value = true
 }
 
 async function openConfigDrawer(agent: any) {

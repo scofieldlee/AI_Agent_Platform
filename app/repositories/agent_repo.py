@@ -54,11 +54,22 @@ async def list_agents(db: AsyncSession) -> List[Dict[str, Any]]:
                 "status": wf.status,
             }
 
+    # Bulk-load creator names
+    creator_names: Dict[int, str] = {}
+    creator_ids = {a.created_by for a in agents if a.created_by}
+    if creator_ids:
+        from app.models.user import User
+        u_result = await db.execute(select(User).where(User.id.in_(creator_ids)))
+        for u in u_result.scalars().all():
+            creator_names[u.id] = u.full_name or u.username
+
     return [
         {
             "id": a.id,
             "name": a.name,
             "code": a.code,
+            "created_by": a.created_by,
+            "created_by_name": creator_names.get(a.created_by),
             "description": a.description,
             "agent_type": a.agent_type,
             "status": a.status,

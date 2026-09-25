@@ -62,6 +62,7 @@ class ToolStatsResponse(BaseModel):
     last_executed_24h: Optional[str] = None
     total_all: int = 0
     success_all: int = 0
+    requires_approval: bool = False
 
 
 class ToolDetailResponse(ToolStatsResponse):

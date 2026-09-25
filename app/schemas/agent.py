@@ -91,6 +91,8 @@ class AgentResponse(BaseModel):
     is_active: bool
     chat_token: Optional[str] = None
     workflow: Optional[dict] = None  # primary workflow summary, if bound
+    created_by: Optional[int] = None  # owner (None = legacy public)
+    created_by_name: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

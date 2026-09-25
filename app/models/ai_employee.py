@@ -41,6 +41,8 @@ class AIEmployee(Base):
         ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="draft", index=True)
     # draft / published / disabled
+    created_by: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True)  # owner; NULL = legacy public
     config: Mapped[dict] = mapped_column(JSONB, default=dict)
     # config: {
     #   "max_agent_calls": 20,

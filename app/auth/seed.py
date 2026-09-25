@@ -37,6 +37,14 @@ PERMISSION_CATALOG = [
     ("tool:view", "View Tools", "tool", "view", "View registered tools"),
     ("tool:manage", "Manage Tools", "tool", "manage", "Register, update, delete tools"),
 
+    # IM Channels (Feishu / DingTalk integrations)
+    ("channel:view", "View IM Channels", "channel", "view", "View IM channel bindings and status"),
+    ("channel:manage", "Manage IM Channels", "channel", "manage", "Bind, update and delete IM channels"),
+
+    # AI Employees (multi-agent teams)
+    ("employee:view", "View AI Employees", "employee", "view", "View AI employee teams and tasks"),
+    ("employee:manage", "Manage AI Employees", "employee", "manage", "Create, publish and configure AI employee teams"),
+
     # Models
     ("model:view", "View Models", "model", "view", "View model configurations"),
     ("model:manage", "Manage Models", "model", "manage", "Configure model providers and settings"),
@@ -73,6 +81,8 @@ ROLE_PERMISSIONS = {
         "multimodal:view", "multimodal:manage",
         "tool:view", "tool:manage",
         "model:view", "model:manage",
+        "channel:view", "channel:manage",
+        "employee:view", "employee:manage",
         "analytics:view",
         "audit:view",
         "conversation:view",
@@ -86,6 +96,7 @@ ROLE_PERMISSIONS = {
         "analytics:view",
         "audit:view",
         "memory:view",
+        "channel:view", "employee:view",
     ],
     "developer": [
         "dashboard:view",
@@ -94,6 +105,7 @@ ROLE_PERMISSIONS = {
         "multimodal:view", "multimodal:manage",
         "tool:view",
         "model:view",
+        "channel:view", "employee:view",
         "analytics:view",
     ],
     "customer_service": [

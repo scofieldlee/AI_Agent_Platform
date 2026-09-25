@@ -332,6 +332,14 @@
             </div>
           </div>
 
+          <!-- 成员授权 -->
+          <ResourceShareSection
+            v-if="editing"
+            resource-type="employee"
+            :resource-id="editing.id"
+            resource-label="AI 员工团队"
+          />
+
           <!-- Advanced Config -->
           <div class="config-section">
             <a-collapse ghost>
@@ -418,6 +426,7 @@ import {
 } from '@ant-design/icons-vue'
 import { employeeApi, channelsApi } from '@/api/client'
 import { formatTime } from '@/utils/time'
+import ResourceShareSection from '@/components/ResourceShareSection.vue'
 
 const router = useRouter()
 
