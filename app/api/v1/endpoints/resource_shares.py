@@ -64,7 +64,7 @@ async def _resolve_principal(
 
 class ShareCreateRequest(BaseModel):
     principal_type: str  # user | role
-    identifier: str      # username 或 role code
+    identifiers: list[str]  # usernames 或 role codes（支持批量）
     permission: str      # chat | view | manage
 
 
@@ -100,6 +100,33 @@ async def list_shares_endpoint(
     return {"items": items}
 
 
+@router.get("/{resource_type}/{resource_id}/eligible-users")
+async def eligible_users_endpoint(
+    resource_type: str,
+    resource_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List users available for sharing (owner/admin only).
+
+    Lightweight view (id/username/full_name) so a non-admin owner can
+    populate the share dropdown without needing user:view.
+    """
+    if resource_type not in ("agent", "employee"):
+        raise HTTPException(status_code=400, detail="不支持的资源类型")
+    await _require_owner_or_admin(db, current_user, resource_type, resource_id)
+    result = await db.execute(
+        select(User).where(User.is_active == True)  # noqa: E712
+    )
+    # Exclude IM placeholder accounts (auto-created channel users)
+    excluded_prefixes = ("channel_", "external_user_")
+    return [
+        {"id": u.id, "username": u.username, "full_name": u.full_name}
+        for u in result.scalars().all()
+        if not u.username.startswith(excluded_prefixes)
+    ]
+
+
 @router.post("/{resource_type}/{resource_id}/shares")
 async def create_share_endpoint(
     resource_type: str,
@@ -120,15 +147,22 @@ async def create_share_endpoint(
         raise HTTPException(status_code=403, detail="角色级授权仅超级管理员可操作")
 
     await _require_owner_or_admin(db, current_user, resource_type, resource_id)
-    principal_id = await _resolve_principal(db, payload.principal_type, payload.identifier)
 
-    share = await resource_share_repo.upsert_share(
-        db, resource_type, resource_id,
-        payload.principal_type, principal_id,
-        payload.permission, current_user.id,
-    )
+    granted, skipped = [], []
+    for identifier in payload.identifiers:
+        try:
+            principal_id = await _resolve_principal(db, payload.principal_type, identifier.strip())
+        except HTTPException as e:
+            skipped.append({"identifier": identifier, "reason": e.detail})
+            continue
+        await resource_share_repo.upsert_share(
+            db, resource_type, resource_id,
+            payload.principal_type, principal_id,
+            payload.permission, current_user.id,
+        )
+        granted.append(identifier)
     await db.commit()
-    return {"id": share.id, "permission": share.permission, "principal_id": principal_id}
+    return {"granted": granted, "skipped": skipped, "permission": payload.permission}
 
 
 @router.delete("/{resource_type}/{resource_id}/shares/{share_id}")

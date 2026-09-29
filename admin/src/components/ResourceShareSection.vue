@@ -16,7 +16,9 @@
       <!-- 按用户 -->
       <a-tab-pane key="user" tab="按用户">
         <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-          <a-input v-model:value="userForm.identifier" placeholder="用户名" style="width: 160px;" size="small" />
+          <a-select v-model:value="userForm.identifiers" mode="multiple" placeholder="选择用户（可多选）"
+            style="flex: 1; min-width: 200px;" size="small" :options="userOptions"
+            option-filter-prop="label" :max-tag-count="3" />
           <a-select v-model:value="userForm.permission" style="width: 110px;" size="small">
             <a-select-option value="chat">对话</a-select-option>
             <a-select-option value="view">查看</a-select-option>
@@ -96,8 +98,9 @@ const granting = ref(false)
 const userShares = ref<any[]>([])
 const roleShares = ref<any[]>([])
 const roleOptions = ref<any[]>([])
-const userForm = ref({ identifier: '', permission: 'view' })
+const userForm = ref({ identifiers: [] as string[], permission: 'view' })
 const roleForm = ref({ identifier: undefined as string | undefined, permission: 'view' })
+const userOptions = ref<any[]>([])
 
 const userColumns = [
   { title: '用户', key: 'principal_name', width: 160 },
@@ -139,21 +142,40 @@ async function fetchRoles() {
   } catch { roleOptions.value = [] }
 }
 
+async function fetchUserOptions() {
+  try {
+    const res = await resourceSharesApi.eligibleUsers(props.resourceType, props.resourceId)
+    userOptions.value = (res.data || []).map((u: any) => ({
+      value: u.username,
+      label: u.full_name ? `${u.full_name}（${u.username}）` : u.username
+    }))
+  } catch { userOptions.value = [] }
+}
+
 async function grant(principalType: 'user' | 'role') {
-  const form = principalType === 'user' ? userForm.value : roleForm.value
-  if (!form.identifier?.trim()) {
-    message.error(principalType === 'user' ? '请输入用户名' : '请选择角色')
+  const identifiers = principalType === 'user'
+    ? [...userForm.value.identifiers]
+    : (roleForm.value.identifier ? [roleForm.value.identifier] : [])
+  const permission = principalType === 'user' ? userForm.value.permission : roleForm.value.permission
+  if (!identifiers.length) {
+    message.error(principalType === 'user' ? '请选择用户' : '请选择角色')
     return
   }
   granting.value = true
   try {
-    await resourceSharesApi.grant(props.resourceType, props.resourceId, {
+    const res = await resourceSharesApi.grant(props.resourceType, props.resourceId, {
       principal_type: principalType,
-      identifier: form.identifier.trim(),
-      permission: form.permission as 'chat' | 'view' | 'manage'
+      identifiers,
+      permission: permission as 'chat' | 'view' | 'manage'
     })
-    message.success('授权成功')
-    form.identifier = principalType === 'user' ? '' : undefined
+    const { granted, skipped } = res.data || {}
+    if (skipped?.length) {
+      message.warning(`已授权 ${granted.length} 个，跳过 ${skipped.length} 个：${skipped.map((s: any) => s.identifier).join('、')}`)
+    } else {
+      message.success(`已授权 ${granted.length} 个${principalType === 'role' ? '角色' : '用户'}`)
+    }
+    if (principalType === 'user') userForm.value.identifiers = []
+    else roleForm.value.identifier = undefined
     await fetchShares()
   } catch (err: any) {
     message.error(err?.response?.data?.detail || '授权失败')
@@ -172,6 +194,7 @@ async function revoke(record: any) {
 
 onMounted(async () => {
   await fetchShares()
+  await fetchUserOptions()
   await fetchRoles()
 })
 </script>

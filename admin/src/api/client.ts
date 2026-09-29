@@ -118,6 +118,15 @@ export const conversationsApi = {
 // ===== Knowledge =====
 export const knowledgeApi = {
   list: () => client.get('/knowledge'),
+  qaSediment: {
+    submit: (data: Record<string, any>) => client.post('/knowledge/qa-sediment/submit', data),
+    list: (params?: { status?: string; knowledge_base_id?: number }) =>
+      client.get('/knowledge/qa-sediment', { params }),
+    update: (id: number, data: Record<string, any>) => client.put(`/knowledge/qa-sediment/${id}`, data),
+    publish: (id: number) => client.post(`/knowledge/qa-sediment/${id}/publish`),
+    reject: (id: number) => client.post(`/knowledge/qa-sediment/${id}/reject`),
+    remove: (id: number) => client.delete(`/knowledge/qa-sediment/${id}`)
+  },
   create: (data: { name: string; kb_type?: string; source_type?: string; source_path: string }) =>
     client.post('/knowledge', data),
   documents: (kbId: number) => client.get(`/knowledge/${kbId}/documents`),
@@ -203,8 +212,10 @@ export const channelsApi = {
 export const resourceSharesApi = {
   list: (resourceType: string, resourceId: number) =>
     client.get(`/resources/${resourceType}/${resourceId}/shares`),
+  eligibleUsers: (resourceType: string, resourceId: number) =>
+    client.get(`/resources/${resourceType}/${resourceId}/eligible-users`),
   grant: (resourceType: string, resourceId: number,
-    data: { principal_type: 'user' | 'role'; identifier: string; permission: 'chat' | 'view' | 'manage' }) =>
+    data: { principal_type: 'user' | 'role'; identifiers: string[]; permission: 'chat' | 'view' | 'manage' }) =>
     client.post(`/resources/${resourceType}/${resourceId}/shares`, data),
   revoke: (resourceType: string, resourceId: number, shareId: number) =>
     client.delete(`/resources/${resourceType}/${resourceId}/shares/${shareId}`)

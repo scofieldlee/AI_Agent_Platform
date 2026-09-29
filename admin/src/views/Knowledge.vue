@@ -28,9 +28,21 @@
         </a-card>
       </a-col>
 
-      <!-- Documents -->
+      <!-- Documents / QA Sediment -->
       <a-col :xs="24" :lg="16">
-        <a-card :title="selectedKB ? `${selectedKB.name} - 文档列表` : '文档列表'">
+        <a-card>
+          <template #title>
+            <a-radio-group v-model:value="rightTab" size="small" button-style="solid">
+              <a-radio-button value="docs">文档列表</a-radio-button>
+              <a-radio-button value="qa">对话沉淀</a-radio-button>
+            </a-radio-group>
+          </template>
+
+          <!-- Tab: 文档列表 -->
+          <div v-show="rightTab === 'docs'">
+          <div v-if="selectedKB" style="margin-bottom: 10px; font-size: 13px; color: #666;">
+            {{ selectedKB.name }} · {{ selectedKB.document_count || 0 }} 文档 · {{ selectedKB.chunk_count || 0 }} 分块
+          </div>
           <a-table :columns="docColumns" :data-source="documents" :loading="docLoading" row-key="id"
             :pagination="{ pageSize: 10 }" size="small"
             :custom-row="(record: any) => ({ onClick: () => openDocDetail(record), style: 'cursor: pointer;' })">
@@ -43,9 +55,80 @@
               </template>
             </template>
           </a-table>
+          </div>
+
+          <!-- Tab: 对话沉淀 -->
+          <div v-show="rightTab === 'qa'">
+            <div style="margin-bottom: 10px; display: flex; gap: 8px; align-items: center;">
+              <a-select v-model:value="qaFilter.status" style="width: 130px;" size="small"
+                :options="[
+                  { value: '', label: '全部状态' },
+                  { value: 'pending', label: '待发布' },
+                  { value: 'published', label: '已发布' },
+                  { value: 'rejected', label: '已拒绝' }
+                ]" @change="fetchQaEntries" />
+              <a-button size="small" @click="fetchQaEntries">刷新</a-button>
+              <span style="font-size: 12px; color: #999;">AI 回答经人工编辑确认后写入知识库（发布后立即可检索）</span>
+            </div>
+            <a-table :columns="qaColumns" :data-source="qaEntries" :loading="qaLoading" row-key="id"
+              :pagination="{ pageSize: 10 }" size="small">
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'question'">
+                  <span style="font-weight: 500;">{{ record.question }}</span>
+                </template>
+                <template v-if="column.key === 'status'">
+                  <a-tag :color="({ pending: 'orange', published: 'green', rejected: 'default' } as Record<string, string>)[record.status]">
+                    {{ ({ pending: '待发布', published: '已发布', rejected: '已拒绝' } as Record<string, string>)[record.status] }}
+                  </a-tag>
+                </template>
+                <template v-if="column.key === 'conversation_id'">
+                  <span v-if="record.conversation_id">#{{ record.conversation_id }}</span>
+                  <span v-else style="color: #999;">—</span>
+                </template>
+                <template v-if="column.key === 'updated_at'">
+                  {{ formatDate(record.updated_at) }}
+                </template>
+                <template v-if="column.key === 'action'">
+                  <a-space>
+                    <a-button size="small" type="link" @click="openQaEdit(record)">编辑</a-button>
+                    <a-button v-if="record.status !== 'published'" size="small" type="link"
+                      style="color: #52c41a;" @click="publishQa(record)">发布</a-button>
+                    <a-popconfirm :title="record.status === 'published' ? '撤销发布并移除索引？' : '拒绝该草稿？'"
+                      @confirm="rejectQa(record)">
+                      <a-button v-if="record.status !== 'rejected'" size="small" type="link" danger>
+                        {{ record.status === 'published' ? '下架' : '拒绝' }}
+                      </a-button>
+                    </a-popconfirm>
+                    <a-popconfirm title="彻底删除该条目？" @confirm="removeQa(record)">
+                      <a-button size="small" type="link" danger>删除</a-button>
+                    </a-popconfirm>
+                  </a-space>
+                </template>
+              </template>
+            </a-table>
+          </div>
         </a-card>
       </a-col>
     </a-row>
+
+    <!-- QA Edit Modal -->
+    <a-modal v-model:open="qaEditOpen" :title="`编辑沉淀条目 #${qaEditForm.id || ''}`" width="640px"
+      :confirm-loading="qaSaving" ok-text="保存" @ok="saveQaEdit">
+      <a-form layout="vertical">
+        <a-form-item label="问题" required>
+          <a-textarea v-model:value="qaEditForm.question" :rows="2" />
+        </a-form-item>
+        <a-form-item label="答案" required>
+          <a-textarea v-model:value="qaEditForm.answer" :rows="6" />
+        </a-form-item>
+        <a-form-item v-if="qaEditForm.status === 'pending'" label="目标知识库">
+          <a-select v-model:value="qaEditForm.kbId" :options="kbOptions" />
+        </a-form-item>
+        <a-form-item label="编辑说明（选填）">
+          <a-input v-model:value="qaEditForm.editNote" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
 
     <!-- Create KB Modal -->
     <a-modal v-model:open="showCreate" title="新建知识库" @ok="createKB" :confirm-loading="creating">
@@ -290,6 +373,101 @@ async function selectKB(kb: any) {
   } finally { docLoading.value = false }
 }
 
+// ===== 对话沉淀 =====
+const rightTab = ref<'docs' | 'qa'>('docs')
+const qaEntries = ref<any[]>([])
+const qaLoading = ref(false)
+const qaFilter = reactive({ status: 'pending' as string })
+const qaEditOpen = ref(false)
+const qaSaving = ref(false)
+const qaEditForm = reactive({
+  id: 0 as number, status: '', question: '', answer: '',
+  kbId: undefined as number | undefined, editNote: ''
+})
+const qaColumns = [
+  { title: '问题', key: 'question', ellipsis: true },
+  { title: '状态', key: 'status', width: 90 },
+  { title: '来源对话', key: 'conversation_id', width: 90 },
+  { title: '更新时间', key: 'updated_at', width: 150 },
+  { title: '操作', key: 'action', width: 200 },
+]
+const kbOptions = ref<any[]>([])
+
+async function fetchKbOptions() {
+  try {
+    const res = await knowledgeApi.list()
+    kbOptions.value = (res.data || []).map((kb: any) => ({ value: kb.id, label: kb.name }))
+  } catch { kbOptions.value = [] }
+}
+
+async function fetchQaEntries() {
+  qaLoading.value = true
+  try {
+    const params: any = {}
+    if (qaFilter.status) params.status = qaFilter.status
+    const res = await knowledgeApi.qaSediment.list(params)
+    qaEntries.value = res.data.items || []
+  } catch { qaEntries.value = [] }
+  finally { qaLoading.value = false }
+}
+
+function openQaEdit(record: any) {
+  qaEditForm.id = record.id
+  qaEditForm.status = record.status
+  qaEditForm.question = record.question
+  qaEditForm.answer = record.answer
+  qaEditForm.kbId = record.knowledge_base_id
+  qaEditForm.editNote = record.edit_note || ''
+  qaEditOpen.value = true
+}
+
+async function saveQaEdit() {
+  qaSaving.value = true
+  try {
+    await knowledgeApi.qaSediment.update(qaEditForm.id, {
+      question: qaEditForm.question,
+      answer: qaEditForm.answer,
+      knowledge_base_id: qaEditForm.kbId,
+      edit_note: qaEditForm.editNote || undefined
+    })
+    message.success('已保存')
+    qaEditOpen.value = false
+    await fetchQaEntries()
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || '保存失败')
+  } finally { qaSaving.value = false }
+}
+
+async function publishQa(record: any) {
+  try {
+    await knowledgeApi.qaSediment.publish(record.id)
+    message.success('已发布，立即可被对话检索命中')
+    await fetchQaEntries()
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || '发布失败')
+  }
+}
+
+async function rejectQa(record: any) {
+  try {
+    await knowledgeApi.qaSediment.reject(record.id)
+    message.success(record.status === 'published' ? '已下架并移除索引' : '已拒绝')
+    await fetchQaEntries()
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || '操作失败')
+  }
+}
+
+async function removeQa(record: any) {
+  try {
+    await knowledgeApi.qaSediment.remove(record.id)
+    message.success('已删除')
+    await fetchQaEntries()
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || '删除失败')
+  }
+}
+
 async function syncKB(kb: any) {
   try {
     await knowledgeApi.sync(kb.id)
@@ -513,5 +691,5 @@ async function deleteChunk(record: any) {
   }
 }
 
-onMounted(() => fetchKBs())
+onMounted(() => { fetchKBs(); fetchQaEntries(); fetchKbOptions() })
 </script>
