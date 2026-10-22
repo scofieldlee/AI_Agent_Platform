@@ -22,6 +22,13 @@ class KnowledgeBase(Base):
     code: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     description: Mapped[Optional[str]] = mapped_column(Text)
     kb_type: Mapped[str] = mapped_column(String(50), default="product")  # product, faq, manual, after_sale
+    # Visibility: 'global' (knowledge center) or 'agent_private' (owned by one
+    # agent, hidden from the global knowledge list, permission follows agent).
+    visibility: Mapped[str] = mapped_column(String(20), default="global")
+    owner_agent_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"), nullable=True, index=True)
+    created_by: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True)  # owner; NULL = legacy public
     source_type: Mapped[str] = mapped_column(String(50), default="obsidian")  # obsidian, file, api, manual
     source_path: Mapped[Optional[str]] = mapped_column(String(500))  # e.g., Obsidian vault path
     config: Mapped[Optional[dict]] = mapped_column(JSONB, default=dict)

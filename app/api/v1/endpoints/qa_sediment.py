@@ -63,6 +63,8 @@ async def submit_endpoint(
     current_user: User = Depends(get_current_user),
 ):
     """Submit a QA draft from a conversation answer (AI drafts, human curates)."""
+    from app.api.v1.endpoints.knowledge import _check_kb_visibility
+    await _check_kb_visibility(db, current_user, payload.knowledge_base_id, need="view")
     entry = await qa_sediment_service.submit_draft(
         db,
         knowledge_base_id=payload.knowledge_base_id,
@@ -112,6 +114,8 @@ async def update_endpoint(
         raise HTTPException(status_code=404, detail="条目不存在")
     if entry.status == "rejected":
         raise HTTPException(status_code=400, detail="已拒绝的条目不可编辑")
+    from app.api.v1.endpoints.knowledge import _check_kb_visibility
+    await _check_kb_visibility(db, current_user, entry.knowledge_base_id, need="manage")
     entry = await qa_sediment_service.update_entry(
         db, entry,
         question=payload.question, answer=payload.answer,
@@ -133,6 +137,8 @@ async def publish_endpoint(
         raise HTTPException(status_code=404, detail="条目不存在")
     if entry.status == "rejected":
         raise HTTPException(status_code=400, detail="已拒绝的条目不可发布")
+    from app.api.v1.endpoints.knowledge import _check_kb_visibility
+    await _check_kb_visibility(db, current_user, entry.knowledge_base_id, need="manage")
     try:
         entry = await qa_sediment_service.publish_entry(db, entry, current_user.id)
         await db.commit()

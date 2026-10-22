@@ -32,7 +32,13 @@ async def _require_owner_or_admin(
     from app.models.agent import Agent
     from app.models.ai_employee import AIEmployee
 
-    model = Agent if resource_type == "agent" else AIEmployee
+    if resource_type == "kb":
+        from app.models.knowledge import KnowledgeBase
+        model = KnowledgeBase
+    elif resource_type == "agent":
+        model = Agent
+    else:
+        model = AIEmployee
     row = await db.get(model, resource_id)
     if not row:
         raise HTTPException(status_code=404, detail="资源不存在")
@@ -75,7 +81,7 @@ async def list_shares_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if resource_type not in ("agent", "employee"):
+    if resource_type not in ("agent", "employee", "kb"):
         raise HTTPException(status_code=400, detail="不支持的资源类型")
     await _require_owner_or_admin(db, current_user, resource_type, resource_id)
 
@@ -112,7 +118,7 @@ async def eligible_users_endpoint(
     Lightweight view (id/username/full_name) so a non-admin owner can
     populate the share dropdown without needing user:view.
     """
-    if resource_type not in ("agent", "employee"):
+    if resource_type not in ("agent", "employee", "kb"):
         raise HTTPException(status_code=400, detail="不支持的资源类型")
     await _require_owner_or_admin(db, current_user, resource_type, resource_id)
     result = await db.execute(
@@ -135,7 +141,7 @@ async def create_share_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if resource_type not in ("agent", "employee"):
+    if resource_type not in ("agent", "employee", "kb"):
         raise HTTPException(status_code=400, detail="不支持的资源类型")
     if payload.principal_type not in ("user", "role"):
         raise HTTPException(status_code=400, detail="principal_type 必须是 user 或 role")

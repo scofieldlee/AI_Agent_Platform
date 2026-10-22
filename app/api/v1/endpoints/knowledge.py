@@ -13,7 +13,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
-from app.auth.dependencies import require_permission
+from app.auth.dependencies import require_permission, get_current_user
+from app.models.user import User
 from app.core.timeutils import local_iso
 from app.core.audit import audit
 from app.schemas.knowledge import (
@@ -30,6 +31,24 @@ from app.repositories.knowledge_repo import (
 router = APIRouter(dependencies=[Depends(require_permission("knowledge:view"))])
 
 logger = logging.getLogger(__name__)
+
+
+async def _check_kb_visibility(db: AsyncSession, user: User, kb_id: int, need: str = "view"):
+    """Data-level ACL check for a knowledge base (same rules as agents).
+
+    404 hides existence; 403 for insufficient level.
+    """
+    from app.services.resource_acl import get_resource_permission
+    kb = await get_knowledge_base(db, kb_id)
+    if not kb:
+        raise HTTPException(status_code=404, detail="知识库不存在")
+    perm = await get_resource_permission(db, user, "kb", kb_id, kb.created_by)
+    order = {"chat": 0, "view": 1, "manage": 2}
+    if perm is None or order.get(perm, -1) < order[need]:
+        if perm is None:
+            raise HTTPException(status_code=404, detail="知识库不存在")
+        raise HTTPException(status_code=403, detail="无该知识库的管理权限，请联系创建者授权")
+    return kb
 
 # Project root / uploads (same convention as conversations.py)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
@@ -126,15 +145,35 @@ def _template_filename(kb) -> str:
 
 
 @router.get("", response_model=List[KnowledgeBaseResponse])
-async def list_knowledge_bases_endpoint(db: AsyncSession = Depends(get_db)):
-    """List all knowledge bases."""
-    return await list_knowledge_bases(db)
+async def list_knowledge_bases_endpoint(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List knowledge bases visible to the current user (data-level ACL).
+
+    Agent-private KBs (visibility='agent_private') are hidden from the
+    global list for non-admin users; admins see them with the visibility
+    flag for audit purposes. Private KBs are managed inside their agent's
+    config page instead.
+    """
+    from app.services.resource_acl import visible_resource_ids, is_admin_user
+    items = await list_knowledge_bases(db)
+    if not await is_admin_user(db, current_user):
+        items = [k for k in items if getattr(k, "visibility", "global") != "agent_private"]
+    all_visible, visible_ids = await visible_resource_ids(
+        db, current_user, "kb", {k.id: k.created_by for k in items}
+    )
+    return items if all_visible else [k for k in items if k.id in visible_ids]
 
 
 @router.post("", response_model=KnowledgeBaseResponse, status_code=201)
 @audit(action="create", resource_type="knowledge",
        resource_name=lambda ctx: getattr(ctx.get("data"), "name", None))
-async def create_knowledge_base_endpoint(data: KnowledgeBaseCreate, db: AsyncSession = Depends(get_db)):
+async def create_knowledge_base_endpoint(
+    data: KnowledgeBaseCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Create a new knowledge base.
 
     The `code` field is optional — auto-generated from kb_type + a random
@@ -146,7 +185,9 @@ async def create_knowledge_base_endpoint(data: KnowledgeBaseCreate, db: AsyncSes
 
     try:
         kb = await create_knowledge_base(db, payload)
+        kb.created_by = current_user.id
         await db.commit()
+        await db.refresh(kb)
         return kb
     except IntegrityError:
         await db.rollback()
@@ -154,13 +195,21 @@ async def create_knowledge_base_endpoint(data: KnowledgeBaseCreate, db: AsyncSes
 
 
 @router.get("/{kb_id}/documents", response_model=List[DocumentResponse])
-async def list_documents_endpoint(kb_id: int, db: AsyncSession = Depends(get_db)):
+async def list_documents_endpoint(
+    kb_id: int, db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """List documents in a knowledge base."""
+    await _check_kb_visibility(db, current_user, kb_id, need="view")
     return await list_documents(db, kb_id)
 
 
 @router.post("/{kb_id}/sync")
-async def sync_knowledge_base_endpoint(kb_id: int, force: bool = False, db: AsyncSession = Depends(get_db)):
+async def sync_knowledge_base_endpoint(
+    kb_id: int, force: bool = False, db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await _check_kb_visibility(db, current_user, kb_id, need="manage")
     """Sync knowledge base from source (e.g., Obsidian vault).
 
     Scans the source directory, parses Markdown files, chunks them,
@@ -188,8 +237,10 @@ async def import_document_endpoint(
     kb_id: int,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     _=Depends(require_permission("knowledge:manage")),
 ):
+    await _check_kb_visibility(db, current_user, kb_id, need="manage")
     """Import an Excel/CSV file into a knowledge base.
 
     First row of each sheet is treated as column headers; each data row becomes
@@ -252,7 +303,11 @@ async def import_document_endpoint(
 
 
 @router.get("/{kb_id}/import-template")
-async def download_import_template_endpoint(kb_id: int, db: AsyncSession = Depends(get_db)):
+async def download_import_template_endpoint(
+    kb_id: int, db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await _check_kb_visibility(db, current_user, kb_id, need="view")
     """Download an Excel template matching the knowledge base type.
 
     The template contains recommended column headers and a few example rows.
@@ -314,8 +369,10 @@ async def _refresh_kb_counters(db: AsyncSession, kb_id: int) -> None:
 
 @router.get("/{kb_id}/documents/{doc_id}", response_model=DocumentDetailResponse)
 async def get_document_endpoint(
-    kb_id: int, doc_id: int, db: AsyncSession = Depends(get_db)
+    kb_id: int, doc_id: int, db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _check_kb_visibility(db, current_user, kb_id, need="view")
     """Return document metadata plus all its chunks (embedding vectors omitted)."""
     doc = await get_document(db, kb_id, doc_id)
     if not doc or doc.knowledge_base_id != kb_id:
@@ -331,7 +388,9 @@ async def get_document_endpoint(
 async def update_document_endpoint(
     kb_id: int, doc_id: int, payload: DocumentUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _check_kb_visibility(db, current_user, kb_id, need="manage")
     """Partially update a document (title, metadata)."""
     doc = await get_document(db, kb_id, doc_id)
     if not doc or doc.knowledge_base_id != kb_id:
@@ -355,8 +414,10 @@ async def update_document_endpoint(
     resource_name_attr="title",
 )
 async def delete_document_endpoint(
-    kb_id: int, doc_id: int, db: AsyncSession = Depends(get_db)
+    kb_id: int, doc_id: int, db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _check_kb_visibility(db, current_user, kb_id, need="manage")
     """Delete a document and all of its chunks (cascades via FK)."""
     doc = await get_document(db, kb_id, doc_id)
     if not doc or doc.knowledge_base_id != kb_id:
@@ -374,7 +435,9 @@ async def delete_document_endpoint(
 async def update_chunk_endpoint(
     kb_id: int, doc_id: int, chunk_id: int, payload: ChunkUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _check_kb_visibility(db, current_user, kb_id, need="manage")
     """Edit a chunk's content and/or section. When content changes, the embedding
     is regenerated automatically so retrieval keeps working."""
     doc = await get_document(db, kb_id, doc_id)
@@ -419,8 +482,10 @@ async def update_chunk_endpoint(
     get_resource=lambda db, kb_id, doc_id, chunk_id: get_chunk(db, chunk_id),
 )
 async def delete_chunk_endpoint(
-    kb_id: int, doc_id: int, chunk_id: int, db: AsyncSession = Depends(get_db)
+    kb_id: int, doc_id: int, chunk_id: int, db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _check_kb_visibility(db, current_user, kb_id, need="manage")
     """Delete a single chunk from a document."""
     doc = await get_document(db, kb_id, doc_id)
     if not doc or doc.knowledge_base_id != kb_id:
@@ -447,7 +512,9 @@ async def update_document_content_endpoint(
     doc_id: int,
     payload: DocumentContentUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _check_kb_visibility(db, current_user, kb_id, need="manage")
     """Replace the full Markdown content of a document.
 
     The content is re-split into chunks using the configured Markdown splitter,

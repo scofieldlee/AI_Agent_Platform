@@ -16,6 +16,7 @@ Architecture:
 """
 
 import logging
+import time
 from typing import Optional, List, Dict, Any
 
 from app.core.config import settings
@@ -189,6 +190,113 @@ class ModelService:
             )
             return adapter
 
+    async def _log_usage(
+        self,
+        *,
+        model_config_id: Optional[int],
+        model_id: str,
+        model_type: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: int,
+        agent_id: Optional[int] = None,
+        conversation_id: Optional[int] = None,
+        duration_ms: Optional[int] = None,
+        status: str = "success",
+        error: Optional[str] = None,
+    ) -> None:
+        """Persist one ModelUsageLog row (fire-and-forget, never raises).
+
+        Usage accounting must never break the chat flow: every failure is
+        swallowed with a warning. Cost is computed from model_configs'
+        input_cost_per_1k / output_cost_per_1k columns (USD per 1K tokens);
+        missing prices yield cost 0.
+        """
+        try:
+            from app.database.session import async_session_factory
+            from app.models.model_config import ModelUsageLog
+
+            def _insert(db, mc_id, ag_id, conv_id):
+                db.add(ModelUsageLog(
+                    model_config_id=mc_id,
+                    agent_id=ag_id,
+                    conversation_id=conv_id,
+                    model_id=model_id or "unknown",
+                    model_type=model_type or "chat",
+                    prompt_tokens=max(0, prompt_tokens),
+                    completion_tokens=max(0, completion_tokens),
+                    total_tokens=max(0, total_tokens),
+                    cost=cost,
+                    duration_ms=duration_ms,
+                    status=status,
+                    error=(str(error)[:500] if error else None),
+                ))
+
+            cost = 0.0
+            async with async_session_factory() as db:
+                if model_config_id:
+                    from sqlalchemy import select
+                    from app.models.model_config import ModelConfig
+                    row = (await db.execute(
+                        select(ModelConfig.input_cost_per_1k, ModelConfig.output_cost_per_1k)
+                        .where(ModelConfig.id == model_config_id)
+                    )).first()
+                    if row:
+                        in_price = float(row[0] or 0)
+                        out_price = float(row[1] or 0)
+                        cost = round(
+                            prompt_tokens / 1000 * in_price + completion_tokens / 1000 * out_price, 6
+                        )
+                _insert(db, model_config_id, agent_id, conversation_id)
+                try:
+                    await db.commit()
+                except Exception as fk_err:
+                    # FK violation (e.g. stale config id on the error path):
+                    # retry with context ids nulled so the usage row survives.
+                    await db.rollback()
+                    if "ForeignKeyViolationError" not in type(fk_err).__name__ and                        "ForeignKeyViolation" not in str(fk_err):
+                        raise
+                    async with async_session_factory() as db2:
+                        _insert(db2, None, None, None)
+                        await db2.commit()
+        except Exception as e:  # noqa: BLE001 — accounting must never raise
+            logger.warning(f"Failed to log model usage: {e}")
+
+    async def _prepare_usage_log(
+        self,
+        *,
+        model_config_id: Optional[int],
+        model_type: str,
+        result: Optional[Dict[str, Any]] = None,
+        error: Optional[Exception] = None,
+        started_at: float,
+        agent_id: Optional[int] = None,
+        conversation_id: Optional[int] = None,
+    ) -> None:
+        """Adapter-call wrapper around _log_usage with duration accounting."""
+        duration_ms = int((time.monotonic() - started_at) * 1000)
+        if error is not None:
+            await self._log_usage(
+                model_config_id=model_config_id,
+                model_id=str(getattr(result, "get", lambda *_: "unknown")("model") or "unknown") if isinstance(result, dict) else "unknown",
+                model_type=model_type,
+                prompt_tokens=0, completion_tokens=0, total_tokens=0,
+                agent_id=agent_id, conversation_id=conversation_id,
+                duration_ms=duration_ms, status="error", error=str(error),
+            )
+            return
+        result = result or {}
+        await self._log_usage(
+            model_config_id=model_config_id,
+            model_id=str(result.get("model") or "unknown"),
+            model_type=model_type,
+            prompt_tokens=int(result.get("prompt_tokens") or 0),
+            completion_tokens=int(result.get("completion_tokens") or 0),
+            total_tokens=int(result.get("total_tokens") or 0),
+            agent_id=agent_id, conversation_id=conversation_id,
+            duration_ms=duration_ms, status="success",
+        )
+
     async def chat(
         self,
         system_prompt: str,
@@ -197,19 +305,23 @@ class ModelService:
         temperature: float = None,
         max_tokens: int = 4096,
         model_config_id: Optional[int] = None,
+        agent_id: Optional[int] = None,
+        conversation_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Generate a chat completion via the configured chat model.
 
         Args:
             model_config_id: Optional model config ID. If provided, uses that
                 provider/model. Otherwise uses the default adapter.
+            agent_id / conversation_id: optional context for usage accounting.
 
         Returns:
             Dict with: content, prompt_tokens, completion_tokens, total_tokens, model, confidence
         """
-        adapter = await self._get_chat_adapter(model_config_id)
+        t0 = time.monotonic()
 
         try:
+            adapter = await self._get_chat_adapter(model_config_id)
             result = await adapter.chat(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -221,7 +333,10 @@ class ModelService:
             # Add confidence estimate (simplified: if we got a response, confidence is decent)
             result["confidence"] = 0.75 if result.get("content") else 0.3
 
-            # TODO: Log to model_usage_logs table
+            await self._prepare_usage_log(
+                model_config_id=model_config_id, model_type="chat", result=result,
+                started_at=t0, agent_id=agent_id, conversation_id=conversation_id,
+            )
             logger.info(
                 f"Model usage | model={result.get('model')} "
                 f"tokens={result.get('total_tokens')} "
@@ -233,6 +348,10 @@ class ModelService:
 
         except Exception as e:
             logger.error(f"Model chat failed: {e}", exc_info=True)
+            await self._prepare_usage_log(
+                model_config_id=model_config_id, model_type="chat", error=e,
+                started_at=t0, agent_id=agent_id, conversation_id=conversation_id,
+            )
             # TODO: Implement fallback chain (DeepSeek -> OpenAI -> Claude)
             raise
 
@@ -253,6 +372,8 @@ class ModelService:
         user_prompt: str,
         conversation_history: Optional[List[Dict]] = None,
         model_config_id: Optional[int] = None,
+        agent_id: Optional[int] = None,
+        conversation_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Use reasoning model for complex tasks (complaints, multi-step analysis).
 
@@ -262,19 +383,34 @@ class ModelService:
 
         # Check if adapter supports reasoning
         if hasattr(adapter, "chat_with_reasoning"):
-            return await adapter.chat_with_reasoning(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                conversation_history=conversation_history,
-            )
+            t0 = time.monotonic()
+            try:
+                result = await adapter.chat_with_reasoning(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    conversation_history=conversation_history,
+                )
+                await self._prepare_usage_log(
+                    model_config_id=model_config_id, model_type="reasoning", result=result,
+                    started_at=t0, agent_id=agent_id, conversation_id=conversation_id,
+                )
+                return result
+            except Exception as e:
+                await self._prepare_usage_log(
+                    model_config_id=model_config_id, model_type="reasoning", error=e,
+                    started_at=t0, agent_id=agent_id, conversation_id=conversation_id,
+                )
+                raise
 
-        # Fallback to regular chat
+        # Fallback to regular chat (usage logged inside self.chat — no double logging)
         logger.warning("Reasoning model not available, falling back to chat model")
         return await self.chat(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             conversation_history=conversation_history,
             model_config_id=model_config_id,
+            agent_id=agent_id,
+            conversation_id=conversation_id,
         )
 
     async def _get_vision_fallback_adapter(self) -> Optional[BaseModelAdapter]:
@@ -505,6 +641,8 @@ class ModelService:
         temperature: float = None,
         max_tokens: int = 4096,
         model_config_id: Optional[int] = None,
+        agent_id: Optional[int] = None,
+        conversation_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Generate a chat completion with image attachments (multimodal).
 
@@ -516,6 +654,7 @@ class ModelService:
             temperature: Sampling temperature.
             max_tokens: Max tokens to generate.
             model_config_id: Optional model config ID.
+            agent_id / conversation_id: optional context for usage accounting.
 
         Returns:
             Dict with: content, prompt_tokens, completion_tokens, total_tokens, model, confidence
@@ -538,6 +677,7 @@ class ModelService:
 
         # Check if adapter supports vision
         if hasattr(adapter, "chat_with_images") and getattr(adapter, "supports_vision", False):
+            t0 = time.monotonic()
             try:
                 result = await adapter.chat_with_images(
                     system_prompt=system_prompt,
@@ -548,6 +688,10 @@ class ModelService:
                     max_tokens=max_tokens,
                 )
                 result["confidence"] = 0.75 if result.get("content") else 0.3
+                await self._prepare_usage_log(
+                    model_config_id=model_config_id, model_type="vision", result=result,
+                    started_at=t0, agent_id=agent_id, conversation_id=conversation_id,
+                )
                 logger.info(
                     f"Multimodal model usage | model={result.get('model')} "
                     f"images={len(images)} tokens={result.get('total_tokens')}"
@@ -555,9 +699,13 @@ class ModelService:
                 return result
             except Exception as e:
                 logger.error(f"Multimodal chat failed: {e}", exc_info=True)
+                await self._prepare_usage_log(
+                    model_config_id=model_config_id, model_type="vision", error=e,
+                    started_at=t0, agent_id=agent_id, conversation_id=conversation_id,
+                )
                 raise
 
-        # Fallback: text-only with notice
+        # Fallback: text-only with notice (usage logged inside self.chat)
         logger.warning(
             "Chat adapter does not support images, falling back to text-only. "
             "Configure a vision-capable model (e.g., GPT-4o, Qwen-VL) for image support."
@@ -570,4 +718,6 @@ class ModelService:
             temperature=temperature,
             max_tokens=max_tokens,
             model_config_id=model_config_id,
+            agent_id=agent_id,
+            conversation_id=conversation_id,
         )

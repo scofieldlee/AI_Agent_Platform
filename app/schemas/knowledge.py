@@ -18,6 +18,12 @@ class KnowledgeBaseCreate(BaseModel):
     config: dict = Field(default_factory=dict)
 
 
+class AgentPrivateKBCreate(BaseModel):
+    """Create an agent-private knowledge base (from the Agent config page)."""
+    name: str
+    description: Optional[str] = None
+
+
 class KnowledgeBaseResponse(BaseModel):
     """Knowledge base list item."""
     id: int
@@ -30,6 +36,12 @@ class KnowledgeBaseResponse(BaseModel):
     document_count: int
     chunk_count: int
     is_active: bool
+    visibility: str = "global"          # global | agent_private
+    owner_agent_id: Optional[int] = None
+
+    @property
+    def is_private(self) -> bool:
+        return self.visibility == "agent_private"
 
     model_config = {"from_attributes": True}
 

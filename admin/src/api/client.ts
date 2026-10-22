@@ -158,6 +158,18 @@ export const knowledgeApi = {
     })
 }
 
+// ===== Usage (model token statistics) =====
+export const usageApi = {
+  summary: (params?: { start?: string; end?: string }) =>
+    client.get('/usage/summary', { params }),
+  timeline: (params?: { start?: string; end?: string; granularity?: 'hour' | 'day' | 'month' }) =>
+    client.get('/usage/timeline', { params }),
+  byModel: (params?: { start?: string; end?: string }) =>
+    client.get('/usage/by-model', { params }),
+  byAgent: (params?: { start?: string; end?: string }) =>
+    client.get('/usage/by-agent', { params })
+}
+
 // ===== Memories =====
 export const memoriesApi = {
   list: (params?: { page?: number; size?: number; memory_type?: string }) =>
@@ -182,7 +194,27 @@ export const agentsApi = {
   bindKnowledge: (id: number, kbIds: number[]) =>
     client.put(`/agents/${id}/knowledge`, { knowledge_base_ids: kbIds }),
   bindWorkflow: (id: number, workflowIds: number[]) =>
-    client.put(`/agents/${id}/workflow`, { workflow_ids: workflowIds })
+    client.put(`/agents/${id}/workflow`, { workflow_ids: workflowIds }),
+  // --- Agent private knowledge bases (managed inside Agent config) ---
+  listPrivateKBs: (id: number) => client.get(`/agents/${id}/kb`),
+  createPrivateKB: (id: number, data: { name: string; description?: string }) =>
+    client.post(`/agents/${id}/kb`, data),
+  deletePrivateKB: (id: number, kbId: number) =>
+    client.delete(`/agents/${id}/kb/${kbId}`),
+  promotePrivateKB: (id: number, kbId: number) =>
+    client.post(`/agents/${id}/kb/${kbId}/promote`),
+  privateKBDocuments: (id: number, kbId: number) =>
+    client.get(`/agents/${id}/kb/${kbId}/documents`),
+  importPrivateKBDoc: (id: number, kbId: number, file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return client.post(`/agents/${id}/kb/${kbId}/import`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000  // embedding large files can take a while
+    })
+  },
+  deletePrivateKBDoc: (id: number, kbId: number, docId: number) =>
+    client.delete(`/agents/${id}/kb/${kbId}/documents/${docId}`)
 }
 
 // ===== Tools =====

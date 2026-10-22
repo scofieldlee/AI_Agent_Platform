@@ -35,6 +35,10 @@
           <LineChartOutlined />
           <span>执行追踪</span>
         </a-menu-item>
+        <a-menu-item v-if="canSee('usage')" key="usage">
+          <PieChartOutlined />
+          <span>用量统计</span>
+        </a-menu-item>
         <a-menu-item v-if="canSee('memories')" key="memories">
           <BulbOutlined />
           <span>记忆管理</span>
@@ -170,7 +174,7 @@ import {
   CustomerServiceOutlined,
   MessageOutlined,
   BookOutlined,
-  LineChartOutlined,
+  LineChartOutlined, PieChartOutlined,
   BulbOutlined,
   BulbFilled,
   RobotOutlined,
@@ -250,6 +254,7 @@ const menuPermissions: Record<string, string> = {
   conversations: 'conversation:view',
   knowledge: 'knowledge:view',
   analytics: 'analytics:view',
+  usage: 'usage:view',
   memories: 'memory:view',
   agents: 'agent:view',
   employees: 'agent:view',
@@ -341,6 +346,8 @@ async function handleLogout() {
 // --- Restore auth state on mount ---
 onMounted(async () => {
   authStore.restoreFromStorage()
+  // 权限快照可能过期（如新增权限组），后台静默刷新一次
+  authStore.refreshUser()
   if (authStore.isLoggedIn && !authStore.user) {
     try {
       await authStore.fetchUser()

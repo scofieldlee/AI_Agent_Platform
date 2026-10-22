@@ -12,15 +12,23 @@
               <a-list-item @click="selectKB(item)" style="cursor: pointer;"
                 :style="{ background: selectedKB?.id === item.id ? '#f0f5ff' : '' }">
                 <a-list-item-meta>
-                  <template #title>{{ item.name }}</template>
+                  <template #title>
+                    {{ item.name }}
+                    <a-tag v-if="item.visibility === 'agent_private'" color="purple"
+                      style="margin-left: 6px; font-size: 11px;">专属</a-tag>
+                  </template>
                   <template #description>
                     {{ item.document_count || 0 }} 文档 · {{ item.chunk_count || 0 }} 分块
                     <br><span style="font-size: 12px; color: #999;">{{ item.source_path }}</span>
                   </template>
                 </a-list-item-meta>
                 <template #actions>
-                  <a-button size="small" type="link" @click.stop="openImport(item)">导入</a-button>
-                  <a-button size="small" type="link" @click.stop="syncKB(item)">同步</a-button>
+                  <template v-if="item.visibility !== 'agent_private'">
+                    <a-button size="small" type="link" @click.stop="openKbShare(item)">授权</a-button>
+                    <a-button size="small" type="link" @click.stop="openImport(item)">导入</a-button>
+                    <a-button size="small" type="link" @click.stop="syncKB(item)">同步</a-button>
+                  </template>
+                  <span v-else style="font-size: 12px; color: #999;">在 Agent 配置页管理</span>
                 </template>
               </a-list-item>
             </template>
@@ -128,6 +136,18 @@
           <a-input v-model:value="qaEditForm.editNote" />
         </a-form-item>
       </a-form>
+    </a-modal>
+
+    <!-- KB Share Modal -->
+    <a-modal v-model:open="kbShareOpen"
+      :title="kbShareTarget ? `成员授权 — ${kbShareTarget.name}` : '成员授权'"
+      width="680px" :footer="null" :destroy-on-close="true">
+      <ResourceShareSection
+        v-if="kbShareOpen && kbShareTarget"
+        resource-type="kb"
+        :resource-id="kbShareTarget.id"
+        resource-label="知识库"
+      />
     </a-modal>
 
     <!-- Create KB Modal -->
@@ -307,6 +327,15 @@ import { message } from 'ant-design-vue'
 import { InboxOutlined } from '@ant-design/icons-vue'
 import { knowledgeApi } from '@/api/client'
 import { formatTime } from '@/utils/time'
+import ResourceShareSection from '@/components/ResourceShareSection.vue'
+
+// ===== 知识库成员授权 =====
+const kbShareOpen = ref(false)
+const kbShareTarget = ref<any>(null)
+function openKbShare(kb: any) {
+  kbShareTarget.value = kb
+  kbShareOpen.value = true
+}
 
 const loading = ref(false)
 const docLoading = ref(false)

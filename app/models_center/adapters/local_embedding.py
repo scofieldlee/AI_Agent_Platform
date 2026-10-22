@@ -38,7 +38,9 @@ class LocalEmbeddingAdapter(BaseEmbeddingAdapter):
     def __init__(self, model_name: str = "BAAI/bge-small-zh-v1.5"):
         self._model_name = model_name
         self._dimension = settings.embedding_dimension  # 512
-        self._client = httpx.AsyncClient(timeout=120.0)  # long timeout for batch embedding
+        # trust_env=False: the local microservice must never go through an
+        # HTTP(S)_ALL proxy (shell env can hijack 127.0.0.1 -> 502).
+        self._client = httpx.AsyncClient(timeout=120.0, trust_env=False)  # long timeout for batch embedding
 
     async def embed(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings by calling the embedding microservice.

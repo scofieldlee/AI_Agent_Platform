@@ -127,13 +127,22 @@ async def knowledge_node(state: AgentState) -> Dict[str, Any]:
     """Retrieve relevant knowledge using RAG.
 
     Flow: Query -> Embedding -> Vector Search -> Rerank -> Context.
+
+    Retrieval is scoped to the KBs bound to this agent when agent_id is
+    present (agent-private KBs enter the scope via their auto-binding);
+    otherwise a global search runs, which excludes agent-private KBs by
+    design (see vector_retriever._search_chunks).
     """
     user_input = state.get("user_input", "")
     intent = state.get("intent", "unknown")
 
     try:
         from app.knowledge.retrievers.vector_retriever import retrieve_knowledge
-        result = await retrieve_knowledge(user_input, top_k=5)
+
+        kb_ids = await _agent_bound_kb_ids(state.get("agent_id"))
+        result = await retrieve_knowledge(
+            user_input, top_k=5, knowledge_base_ids=kb_ids or None,
+        )
         knowledge_context = result.get("context", "")
         knowledge_sources = result.get("sources", [])
     except Exception as e:
@@ -149,6 +158,27 @@ async def knowledge_node(state: AgentState) -> Dict[str, Any]:
         "knowledge_context": knowledge_context,
         "knowledge_sources": knowledge_sources,
     }
+
+
+async def _agent_bound_kb_ids(agent_id) -> Optional[list]:
+    """Resolve the KB ids bound to an agent (None = no scoping)."""
+    if not agent_id:
+        return None
+    try:
+        from sqlalchemy import select
+        from app.database.session import async_session_factory
+        from app.models.agent import AgentKnowledgeBinding
+
+        async with async_session_factory() as db:
+            rows = await db.execute(
+                select(AgentKnowledgeBinding.knowledge_base_id)
+                .where(AgentKnowledgeBinding.agent_id == agent_id)
+            )
+            ids = [r[0] for r in rows.fetchall()]
+            return ids or None
+    except Exception as e:
+        logger.warning(f"Resolve agent KB bindings failed, fallback to global: {e}")
+        return None
 
 
 # --- Memory Retrieval Node ---
@@ -1116,6 +1146,8 @@ async def llm_node(state: AgentState, node_config: Optional[Dict[str, Any]] = No
                 temperature=temperature,
                 max_tokens=max_tokens,
                 model_config_id=model_config_id,
+                agent_id=state.get("agent_id"),
+                conversation_id=state.get("conversation_id"),
             )
         else:
             response = await model_service.chat(
@@ -1125,6 +1157,8 @@ async def llm_node(state: AgentState, node_config: Optional[Dict[str, Any]] = No
                 temperature=temperature,
                 max_tokens=max_tokens,
                 model_config_id=model_config_id,
+                agent_id=state.get("agent_id"),
+                conversation_id=state.get("conversation_id"),
             )
         answer = response.get("content", "")
         confidence = max(confidence, response.get("confidence", 0.7))
@@ -1316,6 +1350,8 @@ async def classifier_node(state: AgentState, node_config: Optional[Dict[str, Any
             temperature=0.0,
             max_tokens=30,
             model_config_id=config.get("model_config_id"),
+            agent_id=state.get("agent_id"),
+            conversation_id=state.get("conversation_id"),
         )
         raw = (result.get("content") or "").strip().strip("\"'「」")
 

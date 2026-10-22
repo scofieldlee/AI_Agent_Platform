@@ -46,6 +46,22 @@ def _dedup_key(msg: InboundMessage) -> str:
     return f"ch:msg:{msg.channel_id}:{msg.message_id}"
 
 
+async def _send_rich_safe(adapter, external_chat_id: str, msg) -> None:
+    """Send a rich card, falling back to plain text when the adapter or
+    channel API doesn't support cards."""
+    try:
+        if hasattr(adapter, "send_rich"):
+            await adapter.send_rich(external_chat_id, msg)
+        else:
+            await adapter.send_text(external_chat_id, msg.markdown)
+    except Exception as e:
+        logger.warning(f"Rich send failed, fallback to text: {e}")
+        try:
+            await adapter.send_text(external_chat_id, msg.markdown)
+        except Exception:
+            pass
+
+
 class ChannelWorker:
     """Runs one WS thread per active channel; reconciles channel list periodically."""
 
@@ -92,17 +108,40 @@ class ChannelWorker:
 
                 # 5. Route by binding target
                 if channel.target_type == "employee":
-                    # Two-phase reply: ack immediately, result pushed on completion
-                    await adapter.send_text(
-                        msg.external_chat_id,
-                        "已收到，正在为您分析处理（多 Agent 协同，预计 30~60 秒），完成后自动推送结果。",
+                    # Two-phase reply: ack card now; P2 progress updates PATCH the same card
+                    from app.channels.rich_message import RichMessage
+                    ack_msg = RichMessage(
+                        markdown="已收到您的消息，正在由 **AI 员工团队** 协同处理（预计 30~60 秒），完成后自动推送结果。",
+                        header="任务已受理", theme="default",
+                        disable_url_promotion=True,
                     )
-                    answer = await self._run_employee_target(db, channel, adapter, msg, platform_uid)
+                    ack_card_id = None
+                    if hasattr(adapter, "send_rich"):
+                        try:
+                            ack_card_id = await adapter.send_rich(msg.external_chat_id, ack_msg)
+                        except Exception:
+                            await _send_rich_safe(adapter, msg.external_chat_id, ack_msg)
+                    else:
+                        await adapter.send_text(msg.external_chat_id, ack_msg.markdown)
+                    answer = await self._run_employee_target(
+                        db, channel, adapter, msg, platform_uid, ack_card_id=ack_card_id)
                 else:
-                    answer = await self._run_agent_target(db, channel, adapter, msg, platform_uid)
+                    answer, conv_id, need_human = await self._run_agent_target(
+                        db, channel, adapter, msg, platform_uid)
 
-            # 7. Reply via the channel
-            await adapter.send_text(msg.external_chat_id, answer)
+            # 7. Reply via the channel (rich card + scenario action buttons)
+            from app.channels.rich_message import RichMessage, Button, sign_action
+            answer_msg = RichMessage(markdown=answer)
+            if channel.target_type == "agent" and need_human:
+                # 一键转人工（Feishu action button; signature-protected）
+                secret = (channel.credentials or {}).get("app_secret", "")
+                payload = {"action": "transfer_human", "conversation_id": conv_id,
+                           "agent_id": channel.agent_id}
+                answer_msg.buttons.append(Button(
+                    text="转人工客服", action="transfer_human",
+                    payload={**payload, "sig": sign_action(channel.id, payload, secret)},
+                ))
+            await _send_rich_safe(adapter, msg.external_chat_id, answer_msg)
             logger.info(
                 f"Channel msg done | channel={msg.channel_id} user={msg.external_user_id[:10]} "
                 f"target={channel.target_type} answer={answer[:40]}"
@@ -117,8 +156,86 @@ class ChannelWorker:
             except Exception:
                 pass
 
-    async def _run_agent_target(self, db, channel, adapter, msg: InboundMessage, platform_uid: int) -> str:
-        """Standard single-Agent pipeline (existing behavior)."""
+    async def handle_card_action(self, channel, adapter, chat_id: str, open_id: str,
+                                 open_message_id: str, value: dict):
+        """Feishu card-action callback (P2). Returns a response card dict or None.
+
+        Supported actions:
+        - transfer_human: create a human task from the current conversation
+        - reply_prompt:   feed the preset prompt back into the conversation pipeline
+        """
+        from app.channels.rich_message import verify_action, CARD_ACTIONS
+        import json as _json
+
+        action = value.get("action")
+        if action not in CARD_ACTIONS:
+            return None
+        sig = value.get("sig", "")
+        secret = (channel.credentials or {}).get("app_secret", "")
+        if not verify_action(channel.id, value, sig, secret):
+            logger.warning(f"Card action signature mismatch | channel={channel.id} action={action}")
+            return None
+
+        conversation_id = value.get("conversation_id")
+
+        if action == "transfer_human":
+            try:
+                from app.human_center.service import HumanCenterService
+                async with async_session_factory() as db:
+                    agent_id = value.get("agent_id")
+                    user_msg = "（用户在飞书卡片中点击「转人工客服」）"
+                    task = await HumanCenterService().create_task(
+                        db,
+                        conversation_id=conversation_id,
+                        agent_id=agent_id,
+                        user_id=None,
+                        user_message=user_msg,
+                        transfer_reason="user_request",
+                        agent_answer="",
+                    )
+                    # mark conversation transferred
+                    if conversation_id:
+                        conv = await self._get_conversation(db, conversation_id)
+                        if conv:
+                            from app.repositories.conversation_repo import update_conversation_status
+                            await update_conversation_status(db, conv, is_transferred=True,
+                                                             transfer_reason="user_request")
+                    await db.commit()
+                    ticket = task.ticket_number
+            except Exception as e:
+                logger.error(f"transfer_human failed: {e}", exc_info=True)
+                return {"config": {"wide_screen_mode": True},
+                        "elements": [{"tag": "div", "text": {"tag": "lark_md",
+                                     "content": "⚠️ 转人工失败，请稍后重试或联系管理员。"}}]}
+            return {"config": {"wide_screen_mode": True},
+                    "elements": [
+                        {"tag": "div", "text": {"tag": "lark_md",
+                         "content": f"✅ 已为您转接人工客服\n\n**工单号：{ticket}**\n客服将尽快跟进处理，请留意回复。"}},
+                    ]}
+
+        if action == "reply_prompt":
+            prompt = value.get("prompt", "")
+            if not prompt:
+                return None
+            # Feed the prompt back into the standard pipeline (async)
+            inbound = InboundMessage(
+                channel_id=channel.id,
+                message_id=f"card_{open_message_id}_{abs(hash(prompt)) % 99999}",
+                external_user_id=open_id,
+                external_chat_id=chat_id,
+                chat_type="group" if chat_id.startswith("oc_") else "p2p",
+                text=prompt,
+                raw={"source": "card_action"},
+            )
+            asyncio.create_task(self.handle_message(inbound))
+            return {"config": {"wide_screen_mode": True},
+                    "elements": [{"tag": "div", "text": {"tag": "lark_md",
+                                 "content": f"已收到：**{prompt[:40]}**\n处理完成后将直接回复结果。"}}]}
+
+        return None
+
+    async def _run_agent_target(self, db, channel, adapter, msg: InboundMessage, platform_uid: int):
+        """Standard single-Agent pipeline. Returns (answer, conversation_id, need_human)."""
         from app.models.agent import Agent
 
         agent = await db.get(Agent, channel.agent_id)
@@ -227,9 +344,10 @@ class ChannelWorker:
             transfer_reason=result.get("transfer_reason"),
         )
         await db.commit()
-        return answer
+        return answer, conversation_id, result.get("need_human", False)
 
-    async def _run_employee_target(self, db, channel, adapter, msg: InboundMessage, platform_uid: int) -> str:
+    async def _run_employee_target(self, db, channel, adapter, msg: InboundMessage, platform_uid: int,
+                                   ack_card_id: Optional[str] = None) -> str:
         """AI Employee team target: multi-phase reply with progress push.
 
         Phase 1 (caller): ack "已收到，正在处理".
@@ -305,16 +423,35 @@ class ChannelWorker:
             status = t.status if t else "running"
             done = [s for s in steps if s.status == "completed"]
 
-            # Progress push: a member step just completed
+            # Progress: a member step just completed
             if len(done) > last_done and status in ("running", "pending"):
                 last_done = len(done)
-                latest = done[-1]
-                label = (getattr(latest, "role", None) or latest.step_key or "环节")[:20]
                 try:
-                    await adapter.send_text(
-                        msg.external_chat_id,
-                        f"⏳ 进度更新：已完成 {len(done)} 个环节（{label}），任务继续处理中…",
-                    )
+                    from app.channels.rich_message import RichMessage
+                    # P2: 单卡片更新——飞书 PATCH 受理卡为成员状态清单（不刷屏）
+                    if ack_card_id and hasattr(adapter, "update_card"):
+                        lines = []
+                        for s in steps:
+                            mark = "✅" if s.status == "completed" else ("🔄" if s.status == "running" else "⏳")
+                            label = (getattr(s, "role", None) or s.step_key or "环节")[:24]
+                            lines.append(f"{mark} {label}")
+                        progress_md = chr(10).join(lines) or "任务排队中…"
+                        try:
+                            await adapter.update_card(ack_card_id, RichMessage(
+                                markdown=progress_md,
+                                header=f"⏳ AI 员工任务进度（{len(done)}/{len(steps)}）",
+                                theme="default", disable_url_promotion=True,
+                            ))
+                        except Exception as e:
+                            logger.warning(f"Card update failed: {e}")
+                    else:
+                        latest = done[-1]
+                        label = (getattr(latest, "role", None) or latest.step_key or "环节")[:20]
+                        await _send_rich_safe(adapter, msg.external_chat_id, RichMessage(
+                            markdown=f"已完成 **{len(done)}** 个环节（{label}），任务继续处理中…",
+                            header="⏳ AI 员工任务进度", theme="default",
+                            disable_url_promotion=True,
+                        ))
                 except Exception as e:
                     logger.warning(f"Progress push failed: {e}")
 
@@ -397,6 +534,15 @@ class ChannelWorker:
         from app.channels.registry import create_adapter
 
         adapter = create_adapter(channel.id, channel.channel_type, channel.credentials)
+
+        # P2: Feishu card-action buttons (转人工 / 快捷追问)
+        if channel.channel_type == "feishu" and hasattr(adapter, "set_card_action_handler"):
+            creds = channel.credentials or {}
+            if creds.get("card_encrypt_key") and creds.get("card_verification_token"):
+                adapter.set_card_action_handler(
+                    lambda chat_id, open_id, msg_id, value:
+                    self.handle_card_action(channel, adapter, chat_id, open_id, msg_id, value)
+                )
         self._adapters[channel.id] = adapter
 
         def _run():

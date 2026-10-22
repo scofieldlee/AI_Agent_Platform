@@ -70,7 +70,7 @@
               <a-button type="link" size="small" @click="openTestModal(record)">
                 <MessageOutlined /> 测试
               </a-button>
-              <a-button type="link" size="small" @click="openConfigDrawer(record)">
+              <a-button type="link" size="small" @click="openConfigPage(record)">
                 <EditOutlined /> 配置
               </a-button>
               <a-button type="link" size="small" @click="openShareModal(record)">
@@ -98,433 +98,6 @@
         </template>
       </a-table>
     </a-card>
-
-    <!-- Config Drawer -->
-    <a-drawer
-      v-model:open="drawerVisible"
-      :title="editingAgent ? `${editingAgent.name} — 配置编辑` : 'Agent 配置'"
-      placement="right"
-      width="640"
-      :destroy-on-close="true"
-    >
-      <a-spin :spinning="detailLoading">
-        <div v-if="agentDetail" class="config-form">
-          <!-- Basic Info -->
-          <div class="config-section">
-            <div class="section-title"><InfoCircleOutlined /> 基本信息</div>
-            <a-form layout="vertical">
-              <a-form-item label="Agent 名称">
-                <a-input v-model:value="formData.name" placeholder="Agent 名称" />
-              </a-form-item>
-              <a-form-item label="描述">
-                <a-textarea v-model:value="formData.description" :rows="2" placeholder="Agent 描述" />
-              </a-form-item>
-              <a-row :gutter="16">
-                <a-col :span="12">
-                  <a-form-item label="状态">
-                    <a-select v-model:value="formData.status" style="width: 100%">
-                      <a-select-option value="draft">草稿</a-select-option>
-                      <a-select-option value="published">已发布</a-select-option>
-                      <a-select-option value="running">运行中</a-select-option>
-                      <a-select-option value="suspended">已暂停</a-select-option>
-                      <a-select-option value="archived">已归档</a-select-option>
-                    </a-select>
-                  </a-form-item>
-                </a-col>
-                <a-col :span="12">
-                  <a-form-item label="启用状态">
-                    <a-switch
-                      v-model:checked="formData.is_active"
-                      checked-children="启用"
-                      un-checked-children="停用"
-                    />
-                  </a-form-item>
-                </a-col>
-              </a-row>
-            </a-form>
-          </div>
-
-          <!-- System Prompt -->
-          <div class="config-section">
-            <div class="section-title"><RobotOutlined /> System Prompt</div>
-            <a-form layout="vertical">
-              <a-form-item>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                  <span style="font-size: 12px; color: #999;">定义 Agent 的角色、职责和回答规则</span>
-                  <span style="font-size: 12px;" :style="{ color: formData.system_prompt.length > 3000 ? '#ff4d4f' : '#999' }">
-                    {{ formData.system_prompt.length }} 字符
-                  </span>
-                </div>
-                <a-textarea
-                  v-model:value="formData.system_prompt"
-                  :rows="10"
-                  placeholder="输入 Agent 的 System Prompt..."
-                  style="font-family: 'SF Mono', 'Monaco', 'Courier New', monospace; font-size: 13px;"
-                />
-              </a-form-item>
-            </a-form>
-          </div>
-
-          <!-- Model Parameters -->
-          <div class="config-section">
-            <div class="section-title"><SettingOutlined /> 模型参数</div>
-            <a-form layout="vertical">
-              <a-row :gutter="16">
-                <a-col :span="12">
-                  <a-form-item label="模型">
-                    <a-select v-model:value="formData.model_config_id" style="width: 100%" placeholder="选择模型">
-                      <a-select-option v-for="opt in modelOptions" :key="opt.id" :value="opt.id">
-                        {{ opt.provider_name }} / {{ opt.name }}
-                        <a-tag size="small" style="margin-left: 4px;">{{ modelTypeLabel(opt.model_type) }}</a-tag>
-                      </a-select-option>
-                    </a-select>
-                  </a-form-item>
-                </a-col>
-                <a-col :span="12">
-                  <a-form-item label="Max Tokens">
-                    <a-input-number
-                      v-model:value="formData.max_tokens"
-                      :min="256"
-                      :max="8192"
-                      :step="256"
-                      style="width: 100%"
-                    />
-                  </a-form-item>
-                </a-col>
-              </a-row>
-              <a-form-item label="Temperature">
-                <div style="display: flex; align-items: center; gap: 12px;">
-                  <a-slider
-                    v-model:value="formData.temperature"
-                    :min="0"
-                    :max="2"
-                    :step="0.1"
-                    style="flex: 1;"
-                  />
-                  <span style="font-weight: 600; min-width: 36px; text-align: right;">{{ formData.temperature }}</span>
-                </div>
-                <div style="font-size: 12px; color: #999; margin-top: -4px;">
-                  0 = 确定性回答, 2 = 创造性回答
-                </div>
-              </a-form-item>
-            </a-form>
-          </div>
-
-          <!-- Input Form / Attachment Support -->
-          <div class="config-section">
-            <div class="section-title"><PaperClipOutlined /> 输入形式 / 附件支持</div>
-            <a-form layout="vertical">
-              <a-form-item label="允许的输入类型">
-                <span style="font-size: 12px; color: #999; display: block; margin-bottom: 8px;">
-                  控制用户在该 Agent 对话中可以上传的文件类型
-                </span>
-                <a-checkbox-group v-model:value="formData.allowed_input_types">
-                  <a-row :gutter="[8, 8]">
-                    <a-col :span="8">
-                      <a-checkbox value="text">
-                        <span style="font-size: 13px;">📄 文本</span>
-                        <div style="font-size: 11px; color: #999;">.txt .md .csv</div>
-                      </a-checkbox>
-                    </a-col>
-                    <a-col :span="8">
-                      <a-checkbox value="pdf">
-                        <span style="font-size: 13px;">📕 PDF</span>
-                        <div style="font-size: 11px; color: #999;">.pdf</div>
-                      </a-checkbox>
-                    </a-col>
-                    <a-col :span="8">
-                      <a-checkbox value="word">
-                        <span style="font-size: 13px;">📝 Word</span>
-                        <div style="font-size: 11px; color: #999;">.docx .doc</div>
-                      </a-checkbox>
-                    </a-col>
-                    <a-col :span="8">
-                      <a-checkbox value="excel">
-                        <span style="font-size: 13px;">📊 Excel</span>
-                        <div style="font-size: 11px; color: #999;">.xlsx .xls</div>
-                      </a-checkbox>
-                    </a-col>
-                    <a-col :span="8">
-                      <a-checkbox value="image">
-                        <span style="font-size: 13px;">🖼️ 图片</span>
-                        <div style="font-size: 11px; color: #999;">需多模态模型</div>
-                      </a-checkbox>
-                    </a-col>
-                    <a-col :span="8">
-                      <a-checkbox value="video">
-                        <span style="font-size: 13px;">🎬 视频</span>
-                        <div style="font-size: 11px; color: #999;">存储+转人工</div>
-                      </a-checkbox>
-                    </a-col>
-                  </a-row>
-                </a-checkbox-group>
-              </a-form-item>
-              <a-row :gutter="16">
-                <a-col :span="12">
-                  <a-form-item label="单文件大小上限 (MB)">
-                    <a-input-number
-                      v-model:value="formData.max_file_size_mb"
-                      :min="1"
-                      :max="100"
-                      style="width: 100%"
-                    />
-                  </a-form-item>
-                </a-col>
-                <a-col :span="12">
-                  <a-form-item label="单条消息最大文件数">
-                    <a-input-number
-                      v-model:value="formData.max_files_per_message"
-                      :min="1"
-                      :max="20"
-                      style="width: 100%"
-                    />
-                  </a-form-item>
-                </a-col>
-              </a-row>
-              <a-alert
-                v-if="formData.allowed_input_types.includes('image') && selectedModelType !== 'vision'"
-                type="warning"
-                show-icon
-                message="图片附件需要多模态模型支持"
-                description="当前选择的模型可能不支持图片识别。建议配置 GPT-4o、Qwen-VL 等视觉模型。"
-                style="margin-top: 4px;"
-              />
-            </a-form>
-          </div>
-
-          <!-- Tool Bindings -->
-          <div class="config-section">
-            <div class="section-title"><ToolOutlined /> 工具绑定</div>
-            <a-select
-              v-model:value="formData.tool_bindings"
-              mode="multiple"
-              style="width: 100%;"
-              placeholder="搜索并选择要绑定的工具..."
-              option-filter-prop="label"
-              :max-tag-count="8"
-              allow-clear
-              :options="toolOptions"
-              :filter-option="filterToolOption"
-            >
-              <template #option="{ label, toolType, desc }">
-                <div style="display: flex; align-items: baseline; gap: 8px;">
-                  <span style="font-family: monospace; font-weight: 500;">{{ label }}</span>
-                  <a-tag :color="toolTypeColor(toolType)" style="font-size: 11px; line-height: 16px; margin-inline-end: 0;">{{ toolType }}</a-tag>
-                </div>
-                <div style="font-size: 12px; opacity: 0.6; white-space: normal;">{{ desc }}</div>
-              </template>
-            </a-select>
-            <div style="margin-top: 6px; font-size: 12px; opacity: 0.6;">
-              已绑定 {{ formData.tool_bindings.length }} / {{ allTools.length }} 个工具，输入关键词可按名称搜索
-            </div>
-          </div>
-
-          <!-- Chat UI Config -->
-          <div class="config-section">
-            <div class="section-title"><MessageOutlined /> 聊天界面配置</div>
-            <a-form layout="vertical">
-              <a-row :gutter="16">
-                <a-col :span="20">
-                  <a-form-item label="欢迎语">
-                    <a-textarea
-                      v-model:value="formData.welcome_message"
-                      :rows="2"
-                      placeholder="如：👋 你好，我是商品客服 Agent"
-                    />
-                  </a-form-item>
-                </a-col>
-                <a-col :span="4">
-                  <a-form-item label="头像 Emoji">
-                    <a-input
-                      v-model:value="formData.avatar_emoji"
-                      placeholder="🛍️"
-                      :maxlength="2"
-                      style="text-align: center; font-size: 18px;"
-                    />
-                  </a-form-item>
-                </a-col>
-              </a-row>
-              <div style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-size: 13px; font-weight: 500;">建议问题</span>
-                <a-button type="dashed" size="small" @click="addSuggestedQuestion">
-                  <PlusOutlined /> 添加问题
-                </a-button>
-              </div>
-              <div v-if="formData.suggested_questions.length === 0" style="font-size: 12px; color: #999; padding: 8px 0;">
-                暂无建议问题，用户进入对话页面将只看到欢迎语
-              </div>
-              <div v-for="(q, idx) in formData.suggested_questions" :key="idx" class="suggestion-edit-item">
-                <a-row :gutter="8" align="middle">
-                  <a-col :span="2">
-                    <a-input v-model:value="q.icon" placeholder="📦" :maxlength="2" style="text-align: center;" />
-                  </a-col>
-                  <a-col :span="6">
-                    <a-input v-model:value="q.title" placeholder="标题" />
-                  </a-col>
-                  <a-col :span="6">
-                    <a-input v-model:value="q.desc" placeholder="描述" />
-                  </a-col>
-                  <a-col :span="8">
-                    <a-input v-model:value="q.question" placeholder="点击后发送的问题" />
-                  </a-col>
-                  <a-col :span="2">
-                    <a-button type="text" danger size="small" @click="removeSuggestedQuestion(idx)">
-                      <DeleteOutlined />
-                    </a-button>
-                  </a-col>
-                </a-row>
-              </div>
-            </a-form>
-          </div>
-
-          <!-- Knowledge Bindings -->
-          <div class="config-section">
-            <div class="section-title"><BookOutlined /> 知识库绑定</div>
-            <a-checkbox-group v-model:value="formData.knowledge_bindings" style="width: 100%;">
-              <div v-for="kb in allKnowledgeBases" :key="kb.id" class="binding-item">
-                <a-checkbox :value="kb.id">
-                  <div class="binding-info">
-                    <div class="binding-name">
-                      {{ kb.name }}
-                      <a-tag style="margin-left: 4px; font-size: 11px;">{{ kb.kb_type || 'general' }}</a-tag>
-                    </div>
-                    <div class="binding-desc">{{ kb.description || `${kb.document_count} 篇文档` }}</div>
-                  </div>
-                </a-checkbox>
-              </div>
-              <div v-if="allKnowledgeBases.length === 0" style="color: #999; font-size: 13px;">
-                暂无知识库
-              </div>
-            </a-checkbox-group>
-          </div>
-
-          <!-- Workflow Bindings -->
-          <div class="config-section">
-            <div class="section-title"><ApartmentOutlined /> 工作流绑定</div>
-            <div style="font-size: 12px; color: #999; margin-bottom: 10px; line-height: 1.5;">
-              选择该 Agent 运行时使用的工作流。勾选的第一个为<span style="color: #4f46e5; font-weight: 600;">主工作流</span>，
-              未绑定任何工作流时使用全局默认工作流。
-              <a-button type="link" size="small" style="padding: 0 0 0 4px;" @click="openWorkflowEditor">
-                管理工作流
-              </a-button>
-            </div>
-            <a-checkbox-group v-model:value="formData.workflow_bindings" style="width: 100%;">
-              <div v-for="wf in allWorkflows" :key="wf.id" class="binding-item">
-                <a-checkbox :value="wf.id">
-                  <div class="binding-info">
-                    <div class="binding-name">
-                      {{ wf.name }}
-                      <a-tag :color="wf.status === 'published' ? 'green' : 'orange'" style="margin-left: 4px; font-size: 11px;">
-                        {{ wf.status === 'published' ? '已发布' : '草稿' }}
-                      </a-tag>
-                      <a-tag style="font-size: 11px;">{{ wf.node_count }} 节点</a-tag>
-                    </div>
-                    <div class="binding-desc">
-                      {{ wf.code }}<template v-if="wf.description"> · {{ wf.description }}</template>
-                    </div>
-                  </div>
-                </a-checkbox>
-              </div>
-              <div v-if="allWorkflows.length === 0" style="color: #999; font-size: 13px;">
-                暂无工作流，请先在工作流编辑器中创建
-              </div>
-            </a-checkbox-group>
-          </div>
-
-          <!-- IM 渠道集成 -->
-          <div class="config-section">
-            <div class="section-title"><CustomerServiceOutlined /> IM 渠道集成</div>
-            <div style="font-size: 12px; opacity: 0.6; margin-bottom: 10px; line-height: 1.6;">
-              绑定飞书机器人后，用户在飞书单聊或群里 @机器人 即可直接与该 Agent 对话，无需登录本系统。
-              需先在<a href="https://open.feishu.cn/app" target="_blank">飞书开放平台</a>创建企业自建应用并开启机器人能力。
-              如需绑定多 Agent 协同的 AI 员工团队，请到<a href="#/employees" style="text-decoration: underline;">AI 员工</a>页面配置。
-            </div>
-
-            <div v-for="ch in agentChannels" :key="ch.id"
-              style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border: 1px solid rgba(128,128,128,0.2); border-radius: 8px; margin-bottom: 8px;">
-              <div>
-                <div style="font-size: 13px; font-weight: 500;">
-                  {{ ch.name }}
-                  <a-tag :color="ch.channel_type === 'feishu' ? 'blue' : 'default'" style="font-size: 11px;">{{ ch.channel_type }}</a-tag>
-                  <a-tag color="cyan" style="font-size: 11px;">Agent</a-tag>
-                  <a-tag :color="ch.status === 'active' ? 'green' : 'default'" style="font-size: 11px;">
-                    {{ ch.status === 'active' ? '启用' : '停用' }}
-                  </a-tag>
-                </div>
-                <div style="font-size: 11px; opacity: 0.55; margin-top: 2px;">
-                  App ID: {{ ch.credentials?.app_id }}
-                  · 最近连接: {{ ch.last_connected_at ? formatTime(ch.last_connected_at) : '未连接' }}
-                  <span v-if="ch.last_error" style="color: #ff4d4f;">· {{ ch.last_error.substring(0, 40) }}</span>
-                </div>
-              </div>
-              <a-space size="small">
-                <a-button size="small" @click="editChannel(ch)">编辑</a-button>
-                <a-button size="small" @click="testChannel(ch)" :loading="testingChannelId === ch.id">测试</a-button>
-                <a-button size="small" @click="toggleChannel(ch)">{{ ch.status === 'active' ? '停用' : '启用' }}</a-button>
-                <a-popconfirm title="删除该渠道？" @confirm="removeChannel(ch)">
-                  <a-button size="small" danger>删除</a-button>
-                </a-popconfirm>
-              </a-space>
-            </div>
-
-            <a-button v-if="!channelFormVisible" size="small" type="dashed" block @click="showChannelForm">
-              <PlusOutlined /> 绑定飞书机器人
-            </a-button>
-
-            <div v-if="channelFormVisible" style="border: 1px dashed rgba(128,128,128,0.35); border-radius: 8px; padding: 12px; margin-top: 4px;">
-              <a-form layout="vertical" size="small">
-                <a-form-item label="渠道类型" required>
-                  <a-radio-group v-model:value="channelForm.channel_type" button-style="solid" size="small">
-                    <a-radio-button value="feishu">飞书</a-radio-button>
-                    <a-radio-button value="dingtalk">钉钉</a-radio-button>
-                  </a-radio-group>
-                </a-form-item>
-                <a-form-item label="渠道名称" required>
-                  <a-input v-model:value="channelForm.name" placeholder="如：飞书客服机器人" />
-                </a-form-item>
-                <a-form-item label="App ID" required>
-                  <a-input v-model:value="channelForm.app_id" placeholder="cli_xxx" />
-                </a-form-item>
-                <a-form-item :label="editingChannelId ? 'App Secret（留空则不修改）' : 'App Secret'" :required="!editingChannelId">
-                  <a-input-password v-model:value="channelForm.app_secret" placeholder="飞书应用的 App Secret" />
-                </a-form-item>
-                <div style="display: flex; gap: 8px;">
-                  <a-button size="small" @click="channelFormVisible = false">取消</a-button>
-                  <a-button size="small" @click="testChannelForm" :loading="testingForm">测试凭证</a-button>
-                  <a-button type="primary" size="small" :loading="savingChannel" @click="saveChannel">
-                    {{ editingChannelId ? '保存修改' : '绑定' }}
-                  </a-button>
-                </div>
-              </a-form>
-            </div>
-          </div>
-
-          <!-- Version History -->
-          <div class="config-section" v-if="agentDetail.versions?.length > 0">
-            <div class="section-title"><HistoryOutlined /> 版本历史 ({{ agentDetail.versions.length }})</div>
-            <a-timeline style="margin-top: 8px;">
-              <a-timeline-item v-for="ver in agentDetail.versions" :key="ver.id" :color="ver.status === 'published' ? 'green' : 'gray'">
-                <div style="font-size: 13px;">
-                  <span style="font-weight: 600;">v{{ ver.version }}</span>
-                  <span style="color: #999; margin-left: 8px;">{{ formatDate(ver.created_at) }}</span>
-                </div>
-                <div v-if="ver.changelog" style="font-size: 12px; color: #666;">{{ ver.changelog }}</div>
-              </a-timeline-item>
-            </a-timeline>
-          </div>
-        </div>
-      </a-spin>
-
-      <!-- Drawer Footer -->
-      <template #footer>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <a-button @click="drawerVisible = false">取消</a-button>
-          <a-button type="primary" :loading="saving" @click="saveConfig">
-            <SaveOutlined /> 保存配置
-          </a-button>
-        </div>
-      </template>
-    </a-drawer>
 
     <!-- Share Modal -->
     <a-modal
@@ -615,18 +188,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, onMounted } from 'vue'
-import { message } from 'ant-design-vue'
+import { ref, reactive, nextTick, onMounted } from 'vue'
+import { message, Modal } from 'ant-design-vue'
 import {
-  PlusOutlined, EditOutlined, SaveOutlined, DeleteOutlined, MessageOutlined,
-  InfoCircleOutlined, RobotOutlined, SettingOutlined,
-  ToolOutlined, BookOutlined, HistoryOutlined,
-  PaperClipOutlined, ApartmentOutlined,
+  PlusOutlined, EditOutlined, DeleteOutlined, MessageOutlined,
   ExclamationCircleOutlined,
   LinkOutlined, CopyOutlined,
-  CustomerServiceOutlined, ShareAltOutlined,
+  ShareAltOutlined,
 } from '@ant-design/icons-vue'
-import { agentsApi, toolsApi, knowledgeApi, modelsApi, workflowApi, channelsApi } from '@/api/client'
+import { agentsApi } from '@/api/client'
 import { formatTime } from '@/utils/time'
 import ResourceShareSection from '@/components/ResourceShareSection.vue'
 
@@ -645,39 +215,6 @@ const columns = [
   { title: '操作', key: 'action', width: 250 },
 ]
 
-// --- Drawer ---
-const drawerVisible = ref(false)
-const detailLoading = ref(false)
-const saving = ref(false)
-const editingAgent = ref<any>(null)
-const agentDetail = ref<any>(null)
-const allTools = ref<any[]>([])
-const allKnowledgeBases = ref<any[]>([])
-const allWorkflows = ref<any[]>([])
-const modelOptions = ref<any[]>([])
-
-const formData = reactive({
-  name: '',
-  description: '',
-  status: 'draft',
-  is_active: true,
-  system_prompt: '',
-  model_config_id: null as number | null,
-  temperature: 0.3,
-  max_tokens: 4096,
-  tool_bindings: [] as string[],
-  knowledge_bindings: [] as number[],
-  workflow_bindings: [] as number[],
-  // Attachment input config
-  allowed_input_types: ['text'] as string[],
-  max_file_size_mb: 10,
-  max_files_per_message: 5,
-  // Chat UI config
-  welcome_message: '',
-  avatar_emoji: '',
-  suggested_questions: [] as Array<{ icon: string; title: string; desc: string; question: string }>,
-})
-
 // --- Test chat ---
 const testModalVisible = ref(false)
 const selectedAgentForTest = ref<any>(null)
@@ -691,11 +228,6 @@ const showCreateModal = ref(false)
 const creating = ref(false)
 const newAgent = reactive({ name: '', code: '', description: '', agent_type: 'customer_service' })
 
-const selectedModelType = computed(() => {
-  const opt = modelOptions.value.find(o => o.id === formData.model_config_id)
-  return opt?.model_type || 'chat'
-})
-
 function statusColor(s: string) {
   return ({ active: 'green', published: 'green', running: 'green', draft: 'orange', suspended: 'default', archived: 'red' } as any)[s] || 'default'
 }
@@ -705,26 +237,10 @@ function statusLabel(s: string) {
 function typeLabel(t: string) {
   return ({ customer_service: '客服', config: '配置型', assistant: '助手', analyst: '分析', custom: '自定义' } as any)[t] || t
 }
-function toolTypeColor(t: string) {
-  return ({ internal: 'blue', business: 'green', api: 'purple', database: 'orange', mcp: 'cyan' } as any)[t] || 'default'
-}
-const toolOptions = computed(() =>
-  allTools.value.map((t: any) => ({
-    label: t.name,
-    value: t.name,
-    toolType: t.tool_type,
-    desc: t.description
-  }))
-)
-function filterToolOption(input: string, option: any) {
-  const kw = input.toLowerCase()
-  return option.label?.toLowerCase().includes(kw) || option.desc?.toLowerCase().includes(kw)
-}
-function modelTypeLabel(t: string) {
-  return ({ chat: '对话', reasoning: '推理', vision: '视觉', embedding: 'Embedding', rerank: 'Rerank', speech: '语音' } as any)[t] || t
-}
-function formatDate(d: string) {
-  return formatTime(d, 'minute')
+
+function openConfigPage(agent: any) {
+  // 配置项较多，新窗口整页打开（Tab 分区），不占用列表页
+  window.open(`/agents/${agent.id}/config`, '_blank')
 }
 
 function getChatUrl(token: string) {
@@ -755,14 +271,6 @@ async function copyChatUrl(token: string) {
   }
 }
 
-function addSuggestedQuestion() {
-  formData.suggested_questions.push({ icon: '', title: '', desc: '', question: '' })
-}
-
-function removeSuggestedQuestion(idx: number) {
-  formData.suggested_questions.splice(idx, 1)
-}
-
 async function fetchAgents() {
   loading.value = true
   try {
@@ -773,38 +281,6 @@ async function fetchAgents() {
   }
 }
 
-async function fetchTools() {
-  try {
-    const res = await toolsApi.list()
-    allTools.value = res.data || []
-  } catch { /* silent */ }
-}
-
-async function fetchKnowledgeBases() {
-  try {
-    const res = await knowledgeApi.list()
-    allKnowledgeBases.value = res.data || []
-  } catch { /* silent */ }
-}
-
-async function fetchWorkflows() {
-  try {
-    const res = await workflowApi.list()
-    allWorkflows.value = res.data || []
-  } catch { /* silent */ }
-}
-
-function openWorkflowEditor() {
-  drawerVisible.value = false
-  window.location.href = '/workflow'
-}
-
-async function fetchModelOptions() {
-  try {
-    const res = await modelsApi.selectable()
-    modelOptions.value = res.data || []
-  } catch { /* silent */ }
-}
 
 function openTestModal(agent: any) {
   selectedAgentForTest.value = agent
@@ -821,110 +297,6 @@ function openShareModal(agent: any) {
   shareModalOpen.value = true
 }
 
-async function openConfigDrawer(agent: any) {
-  editingAgent.value = agent
-  drawerVisible.value = true
-  detailLoading.value = true
-  channelFormVisible.value = false
-  editingChannelId.value = null
-
-  // IM 渠道列表
-  loadChannels(agent.id)
-
-  // Ensure model options are loaded before populating form
-  if (modelOptions.value.length === 0) {
-    await fetchModelOptions()
-  }
-  // Ensure workflow options are loaded before populating form
-  if (allWorkflows.value.length === 0) {
-    await fetchWorkflows()
-  }
-
-  try {
-    // Fetch full detail with bindings
-    const res = await agentsApi.fullDetail(agent.id)
-    agentDetail.value = res.data
-
-    const d = res.data
-    const config = d.config || {}
-
-    // Populate form
-    formData.name = d.name || ''
-    formData.description = d.description || ''
-    formData.status = d.status || 'draft'
-    formData.is_active = d.is_active ?? true
-    formData.system_prompt = config.system_prompt || ''
-    formData.model_config_id = config.model_config_id ?? null
-    // Backward compatibility: old configs stored model as string
-    if (!formData.model_config_id && config.model) {
-      const matched = modelOptions.value.find(o => o.model_id === config.model)
-      if (matched) {
-        formData.model_config_id = matched.id
-      }
-    }
-    formData.temperature = config.temperature ?? 0.3
-    formData.max_tokens = config.max_tokens ?? 4096
-    formData.allowed_input_types = config.allowed_input_types || ['text']
-    formData.max_file_size_mb = config.max_file_size_mb ?? 10
-    formData.max_files_per_message = config.max_files_per_message ?? 5
-    formData.welcome_message = config.welcome_message || ''
-    formData.avatar_emoji = config.avatar_emoji || ''
-    formData.suggested_questions = config.suggested_questions || []
-    formData.tool_bindings = (d.tool_bindings || []).map((t: any) => t.tool_name)
-    formData.knowledge_bindings = (d.knowledge_bindings || []).map((k: any) => k.knowledge_base_id)
-    // Workflow bindings (primary first, per backend order)
-    formData.workflow_bindings = (d.workflow_bindings || []).map((w: any) => w.workflow_id)
-  } catch (err: any) {
-    message.error('加载 Agent 详情失败: ' + (err.response?.data?.detail || err.message))
-  } finally {
-    detailLoading.value = false
-  }
-}
-
-async function saveConfig() {
-  if (!editingAgent.value) return
-  saving.value = true
-
-  try {
-    const agentId = editingAgent.value.id
-
-    // 1. Update agent config + basic info
-    await agentsApi.update(agentId, {
-      name: formData.name,
-      description: formData.description,
-      status: formData.status,
-      is_active: formData.is_active,
-      config: {
-        system_prompt: formData.system_prompt,
-        model_config_id: formData.model_config_id,
-        temperature: formData.temperature,
-        max_tokens: formData.max_tokens,
-        allowed_input_types: formData.allowed_input_types,
-        max_file_size_mb: formData.max_file_size_mb,
-        max_files_per_message: formData.max_files_per_message,
-        welcome_message: formData.welcome_message,
-        avatar_emoji: formData.avatar_emoji,
-        suggested_questions: formData.suggested_questions,
-      },
-    })
-
-    // 2. Update tool bindings
-    await agentsApi.bindTools(agentId, formData.tool_bindings)
-
-    // 3. Update knowledge bindings
-    await agentsApi.bindKnowledge(agentId, formData.knowledge_bindings)
-
-    // 4. Update workflow bindings (first selected = primary)
-    await agentsApi.bindWorkflow(agentId, formData.workflow_bindings)
-
-    message.success('Agent 配置已保存')
-    await fetchAgents()
-  } catch (err: any) {
-    message.error('保存失败: ' + (err.response?.data?.detail || err.message))
-  } finally {
-    saving.value = false
-  }
-}
 
 async function sendTestMessage() {
   if (!testInput.value.trim() || !selectedAgentForTest.value) return
@@ -1006,13 +378,33 @@ async function handleDelete(agent: any) {
     message.warning('已发布的 Agent 不能删除，请先取消发布')
     return
   }
+  // 删除前检查专属知识库（将随 Agent 级联删除）
+  let privateKBHint = ''
   try {
-    await agentsApi.delete(agent.id)
-    message.success('Agent 已删除')
-    await fetchAgents()
-  } catch (err: any) {
-    message.error('删除失败: ' + (err.response?.data?.detail || err.message))
-  }
+    const res = await agentsApi.listPrivateKBs(agent.id)
+    const kbs = res.data || []
+    if (kbs.length > 0) {
+      const docs = kbs.reduce((s: number, k: any) => s + (k.document_count || 0), 0)
+      privateKBHint =
+        `\n该 Agent 拥有 ${kbs.length} 个专属知识库（共 ${docs} 篇文档），删除 Agent 将一并删除。` +
+        `\n如需保留，请先在 Agent 配置页使用「转公共」。`
+    }
+  } catch { /* ignore: KB 列表拉不到不阻塞删除 */ }
+  Modal.confirm({
+    title: `确认删除 Agent「${agent.name}」？`,
+    content: privateKBHint ? `此操作不可恢复。${privateKBHint}` : '删除后不可恢复。',
+    okText: '删除',
+    okType: 'danger',
+    onOk: async () => {
+      try {
+        await agentsApi.delete(agent.id)
+        message.success('Agent 已删除')
+        await fetchAgents()
+      } catch (err: any) {
+        message.error('删除失败: ' + (err.response?.data?.detail || err.message))
+      }
+    },
+  })
 }
 
 async function handleCreate() {
@@ -1052,149 +444,8 @@ async function handleCreate() {
   }
 }
 
-// ===== IM 渠道集成（仅单 Agent 绑定；AI 员工团队绑定在「AI 员工」页面配置） =====
-const agentChannels = ref<any[]>([])
-const channelFormVisible = ref(false)
-const editingChannelId = ref<number | null>(null)
-const savingChannel = ref(false)
-const testingChannelId = ref<number | null>(null)
-const testingForm = ref(false)
-const channelForm = reactive({ name: '', app_id: '', app_secret: '', channel_type: 'feishu' })
-
-async function loadChannels(agentId: number) {
-  try {
-    const res = await channelsApi.list({ agent_id: agentId })
-    agentChannels.value = res.data.items || []
-  } catch {
-    agentChannels.value = []
-  }
-}
-
-function showChannelForm() {
-  editingChannelId.value = null
-  channelForm.name = ''
-  channelForm.app_id = ''
-  channelForm.app_secret = ''
-  channelForm.channel_type = 'feishu'
-  channelFormVisible.value = true
-}
-
-function editChannel(ch: any) {
-  editingChannelId.value = ch.id
-  channelForm.name = ch.name
-  channelForm.app_id = ch.credentials?.app_id || ''
-  channelForm.app_secret = ''  // 掩码保护：留空表示不修改
-  channelForm.channel_type = ch.channel_type || 'feishu'
-  channelFormVisible.value = true
-}
-
-function validateChannelForm(): boolean {
-  if (!channelForm.name.trim()) { message.error('请填写渠道名称'); return false }
-  if (!channelForm.app_id.trim()) { message.error('请填写 App ID'); return false }
-  if (!editingChannelId.value && !channelForm.app_secret.trim()) {
-    message.error('请填写 App Secret'); return false
-  }
-  return true
-}
-
-function buildChannelPayload(): Record<string, any> {
-  return {
-    channel_type: channelForm.channel_type,
-    name: channelForm.name.trim(),
-    target_type: 'agent',
-    agent_id: editingAgent.value?.id ?? null,
-    credentials: {
-      app_id: channelForm.app_id.trim(),
-      app_secret: channelForm.app_secret.trim()
-    }
-  }
-}
-
-async function saveChannel() {
-  if (!validateChannelForm()) return
-  savingChannel.value = true
-  try {
-    if (editingChannelId.value) {
-      await channelsApi.update(editingChannelId.value, buildChannelPayload())
-      message.success('渠道已更新，消息泵将在 1 分钟内重连')
-    } else {
-      await channelsApi.create(buildChannelPayload())
-      message.success('渠道已绑定，消息泵将在 1 分钟内自动连接')
-    }
-    channelFormVisible.value = false
-    editingChannelId.value = null
-    if (editingAgent.value) await loadChannels(editingAgent.value.id)
-  } catch (err: any) {
-    message.error(err?.response?.data?.detail || '保存失败')
-  } finally { savingChannel.value = false }
-}
-
-async function testChannel(ch: any) {
-  testingChannelId.value = ch.id
-  try {
-    const res = await channelsApi.test(ch.id)
-    if (res.data.success) {
-      message.success('凭证有效，连接正常')
-      if (editingAgent.value) await loadChannels(editingAgent.value.id)
-    } else {
-      message.error(res.data.detail || '连接失败')
-    }
-  } catch (err: any) {
-    message.error(err?.response?.data?.detail || '测试失败')
-  } finally { testingChannelId.value = null }
-}
-
-async function testChannelForm() {
-  // 未保存的表单：先临时创建（停用状态）再测试，失败即删除
-  if (!validateChannelForm()) return
-  testingForm.value = true
-  let tempId: number | null = null
-  try {
-    const payload = buildChannelPayload()
-    payload.status = 'disabled'
-    const created = await channelsApi.create(payload)
-    tempId = created.data.id
-    const res = await channelsApi.test(created.data.id as number)
-    if (res.data.success) {
-      message.success('凭证有效')
-    } else {
-      message.error(res.data.detail || '凭证校验失败')
-    }
-  } catch (err: any) {
-    message.error(err?.response?.data?.detail || '测试失败')
-  } finally {
-    if (tempId) {
-      try { await channelsApi.remove(tempId) } catch {}
-    }
-    testingForm.value = false
-  }
-}
-
-async function toggleChannel(ch: any) {
-  try {
-    await channelsApi.update(ch.id, { status: ch.status === 'active' ? 'disabled' : 'active' })
-    if (editingAgent.value) await loadChannels(editingAgent.value.id)
-  } catch (err: any) {
-    message.error(err?.response?.data?.detail || '操作失败')
-  }
-}
-
-async function removeChannel(ch: any) {
-  try {
-    await channelsApi.remove(ch.id)
-    message.success('渠道已删除')
-    if (editingAgent.value) await loadChannels(editingAgent.value.id)
-  } catch (err: any) {
-    message.error(err?.response?.data?.detail || '删除失败')
-  }
-}
-
 onMounted(() => {
   fetchAgents()
-  fetchTools()
-  fetchKnowledgeBases()
-  fetchWorkflows()
-  fetchModelOptions()
 })
 </script>
 

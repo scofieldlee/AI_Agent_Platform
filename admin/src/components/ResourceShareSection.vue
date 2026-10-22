@@ -83,7 +83,7 @@ import { resourceSharesApi, authApi } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{
-  resourceType: 'agent' | 'employee'
+  resourceType: 'agent' | 'employee' | 'kb'
   resourceId: number
   resourceLabel: string
 }>()

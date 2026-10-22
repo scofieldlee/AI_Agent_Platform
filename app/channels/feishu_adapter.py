@@ -35,6 +35,9 @@ class FeishuAdapter(ChannelAdapter):
     channel_type = "feishu"
 
     def __init__(self, channel_id: int, credentials: Dict[str, Any]):
+        # P2: callback handler injected by the worker (set_card_action_handler)
+        self._card_action_handler = None
+        self._loop = None
         super().__init__(channel_id, credentials)
         self._app_id: str = credentials.get("app_id", "")
         self._app_secret: str = credentials.get("app_secret", "")
@@ -83,6 +86,7 @@ class FeishuAdapter(ChannelAdapter):
 
         if loop is None:
             loop = asyncio.get_event_loop()
+        self._loop = loop
         self._stop_event.clear()
 
         def _on_event(data: P2ImMessageReceiveV1) -> None:
@@ -98,12 +102,46 @@ class FeishuAdapter(ChannelAdapter):
             .register_p2_im_message_receive_v1(_on_event)
             .build()
         )
-        self._ws_client = lark.ws.Client(
-            self._app_id,
-            self._app_secret,
-            event_handler=handler,
-            log_level=lark.LogLevel.DEBUG,  # 联调期：DEBUG 观察事件帧
-        )
+
+        card_handler = None
+        encrypt_key, verify_token = self._card_secret()
+        if self._card_action_handler and encrypt_key and verify_token:
+            def _on_card_action(data):
+                """Card button callback → platform action → respond with a card."""
+                try:
+                    result = self._dispatch_card_action(data)
+                    return result  # dict card JSON or None
+                except Exception:
+                    logger.exception("Feishu card action failed")
+                    return None
+
+            card_handler = (
+                lark.CardActionHandler.builder(encrypt_key, verify_token)
+                .register(_on_card_action)
+                .build()
+            )
+            logger.info(f"Feishu card actions enabled | channel_id={self.channel_id}")
+
+        # 卡片回调回调必须在构造 ws.Client 时传入。
+        # 部分 lark-oapi 版本（如 1.7.3）的 Client.__init__ 尚未支持 card_handler
+        # 关键字，直接传参会抛 TypeError 导致渠道启动即崩，故做能力探测 + 降级。
+        client_kwargs: Dict[str, Any] = {
+            "event_handler": handler,
+            "log_level": lark.LogLevel.DEBUG,  # 联调期：DEBUG 观察事件帧
+        }
+        if card_handler is not None:
+            client_kwargs["card_handler"] = card_handler
+        try:
+            self._ws_client = lark.ws.Client(self._app_id, self._app_secret, **client_kwargs)
+        except TypeError as e:
+            if "card_handler" not in client_kwargs:
+                raise
+            logger.warning(
+                f"lark-oapi 当前版本不支持 ws.Client(card_handler=...)，"
+                f"降级为无卡片回调模式：{e}"
+            )
+            client_kwargs.pop("card_handler", None)
+            self._ws_client = lark.ws.Client(self._app_id, self._app_secret, **client_kwargs)
         logger.info(f"Feishu WS connecting | channel_id={self.channel_id}")
         # Blocking run; reconnects are handled by the SDK internally
         self._ws_client.start()
@@ -158,9 +196,103 @@ class FeishuAdapter(ChannelAdapter):
                 },
             )
             data = resp.json()
+
+    async def send_rich(self, external_chat_id: str, msg: "RichMessage") -> None:
+        """Send an interactive card (markdown body + link buttons)."""
+        from app.channels.feishu_card import render_feishu_card
+
+        token = await self._get_tenant_access_token()
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                f"{FEISHU_BASE_URL}/open-apis/im/v1/messages",
+                params={"receive_id_type": "chat_id"},
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "receive_id": external_chat_id,
+                    "msg_type": "interactive",
+                    "content": render_feishu_card(msg),
+                },
+            )
+            data = resp.json()
+        if data.get("code") != 0:
+            logger.error(f"Feishu card send failed: code={data.get('code')} msg={data.get('msg')}")
+            raise RuntimeError(f"飞书卡片发送失败: {data.get('msg')}")
+        # P2: return message_id so callers can update the card later
+        return (data.get("data") or {}).get("message_id")
+    async def update_card(self, message_id: str, msg) -> None:
+        """Update an existing interactive card (Feishu PATCH). Used for
+        progressive updates (e.g. AI employee task progress) without spamming."""
+        from app.channels.feishu_card import render_feishu_card
+
+        token = await self._get_tenant_access_token()
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.patch(
+                f"{FEISHU_BASE_URL}/open-apis/im/v1/messages/{message_id}",
+                params={"receive_id_type": "chat_id"},
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "msg_type": "interactive",
+                    "content": render_feishu_card(msg),
+                },
+            )
+            data = resp.json()
+        if data.get("code") != 0:
+            logger.warning(f"Feishu card update failed: code={data.get('code')} msg={data.get('msg')}")
+
+    def _card_secret(self) -> tuple:
+        """(encrypt_key, verification_token) from credentials; empty = disabled."""
+        c = self.credentials or {}
+        return c.get("card_encrypt_key", ""), c.get("card_verification_token", "")
         if data.get("code") != 0:
             logger.error(f"Feishu send failed: code={data.get('code')} msg={data.get('msg')}")
             raise RuntimeError(f"飞书消息发送失败: {data.get('msg')}")
+
+    def set_card_action_handler(self, handler) -> None:
+        """Inject the worker's card-action callback (async fn(channel, payload, sig, chat_id, user_id))."""
+        self._card_action_handler = handler
+
+    def _dispatch_card_action(self, data):
+        """Parse a card.action.trigger event, verify, and dispatch to the
+        injected async handler. Returns the response card (dict) or None."""
+        import json as _json
+
+        def _get(obj, *names):
+            for n in names:
+                v = obj.get(n) if isinstance(obj, dict) else getattr(obj, n, None)
+                if v is not None:
+                    return v
+            return None
+
+        action_data = _get(data, "action") or {}
+        value = _get(action_data, "value") or {}
+        if isinstance(value, str):
+            try:
+                value = _json.loads(value)
+            except Exception:
+                value = {}
+        action = value.get("action")
+        if not action:
+            return None
+
+        context = _get(data, "context") or {}
+        chat_id = _get(context, "open_chat_id") or ""
+        operator = _get(data, "operator") or {}
+        open_id = _get(operator, "open_id") or ""
+        open_message_id = _get(data, "open_message_id") or ""
+
+        if self._card_action_handler is None:
+            return None
+
+        # Dispatch async; the handler returns a response card dict (or None)
+        fut = asyncio.run_coroutine_threadsafe(
+            self._card_action_handler(chat_id, open_id, open_message_id, value),
+            self._loop,
+        )
+        try:
+            return fut.result(timeout=25)
+        except Exception:
+            logger.exception("Card action handler timeout/error")
+            return None
 
     def stop(self) -> None:
         self._stop_event.set()

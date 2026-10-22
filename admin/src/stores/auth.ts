@@ -63,6 +63,17 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function refreshUser() {
+    /** Silently re-fetch the user (and permission list) after restore.
+     *  Keeps newly-added permissions visible without re-login. */
+    if (!localStorage.getItem('access_token')) return
+    try {
+      await fetchUser()
+    } catch {
+      // silent: token expiry is handled by the router guard / API client
+    }
+  }
+
   async function logout() {
     try {
       await authApi.logout()
@@ -86,6 +97,7 @@ export const useAuthStore = defineStore('auth', () => {
     hasAnyPermission,
     login,
     fetchUser,
+    refreshUser,
     restoreFromStorage,
     logout
   }

@@ -66,26 +66,46 @@ async def _search_chunks(
     query_vector: List[float],
     top_k: int,
     knowledge_base_id: Optional[int] = None,
+    knowledge_base_ids: Optional[List[int]] = None,
 ) -> List[Any]:
-    """Cosine similarity search in pgvector. Returns raw rows."""
+    """Cosine similarity search in pgvector. Returns raw rows.
+
+    Scope rules:
+    - ``knowledge_base_ids`` given  -> search those KBs only (agent bindings)
+    - ``knowledge_base_id`` given   -> search that single KB
+    - neither given                 -> global search, but agent-private KBs
+      are always excluded (content-isolation hard guarantee)
+    """
     from app.database.session import async_session_factory
     from sqlalchemy import text
 
-    kb_filter = ""
+    joins = ""
+    where = "WHERE c.embedding IS NOT NULL"
     params: Dict[str, Any] = {
         "query_vector": str(query_vector),
         "top_k": top_k,
     }
-    if knowledge_base_id:
-        kb_filter = "JOIN documents d ON d.id = c.document_id AND d.knowledge_base_id = :kb_id"
+    if knowledge_base_ids:
+        joins = "JOIN documents d ON d.id = c.document_id"
+        where += " AND d.knowledge_base_id = ANY(:kb_ids)"
+        params["kb_ids"] = list(knowledge_base_ids)
+    elif knowledge_base_id:
+        joins = "JOIN documents d ON d.id = c.document_id AND d.knowledge_base_id = :kb_id"
         params["kb_id"] = knowledge_base_id
+    else:
+        # Global search: never leak agent-private KB content.
+        joins = (
+            "JOIN documents d ON d.id = c.document_id "
+            "JOIN knowledge_bases k ON k.id = d.knowledge_base_id"
+        )
+        where += " AND COALESCE(k.visibility, 'global') <> 'agent_private'"
 
     sql = text(f"""
         SELECT c.id, c.content, c.section, c.metadata as meta,
                1 - (c.embedding <=> CAST(:query_vector AS vector)) as score
         FROM chunks c
-        {kb_filter}
-        WHERE c.embedding IS NOT NULL
+        {joins}
+        {where}
         ORDER BY c.embedding <=> CAST(:query_vector AS vector)
         LIMIT :top_k
     """)
@@ -99,6 +119,7 @@ async def retrieve_knowledge(
     query: str,
     top_k: int = None,
     knowledge_base_id: int = None,
+    knowledge_base_ids: List[int] = None,
 ) -> Dict[str, Any]:
     """Retrieve relevant knowledge for a user query.
 
@@ -106,7 +127,11 @@ async def retrieve_knowledge(
         query: User's question (any language; non-Chinese queries are
             auto-translated and searched bilingually).
         top_k: Number of chunks to retrieve.
-        knowledge_base_id: Filter by knowledge base (optional).
+        knowledge_base_id: Filter by a single knowledge base (optional).
+        knowledge_base_ids: Filter by multiple knowledge bases (optional,
+            e.g. the agent's bound KBs; takes precedence over
+            ``knowledge_base_id``). When neither is given the search is
+            global but agent-private KBs are always excluded.
 
     Returns:
         Dict with:
@@ -141,7 +166,11 @@ async def retrieve_knowledge(
         # 2. Vector search per query, merge by chunk id keeping max score
         merged: Dict[int, Any] = {}
         for vec in embeddings:
-            rows = await _search_chunks(vec, settings.vector_search_top_k, knowledge_base_id)
+            rows = await _search_chunks(
+                vec, settings.vector_search_top_k,
+                knowledge_base_id=knowledge_base_id,
+                knowledge_base_ids=knowledge_base_ids,
+            )
             for row in rows:
                 if row.id not in merged or float(row.score) > float(merged[row.id].score):
                     merged[row.id] = row

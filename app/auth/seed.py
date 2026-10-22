@@ -60,6 +60,9 @@ PERMISSION_CATALOG = [
     # Analytics
     ("analytics:view", "View Analytics", "analytics", "view", "View execution traces and stats"),
 
+    # Usage (model token accounting)
+    ("usage:view", "View Usage Stats", "usage", "view", "View model token usage and cost statistics"),
+
     # Audit Logs (operation logs)
     ("audit:view", "View Audit Logs", "audit", "view", "View system operation / audit logs"),
 
@@ -83,7 +86,7 @@ ROLE_PERMISSIONS = {
         "model:view", "model:manage",
         "channel:view", "channel:manage",
         "employee:view", "employee:manage",
-        "analytics:view",
+        "analytics:view", "usage:view",
         "audit:view",
         "conversation:view",
         "ticket:view", "ticket:manage",
@@ -93,7 +96,7 @@ ROLE_PERMISSIONS = {
         "dashboard:view",
         "conversation:view", "conversation:manage",
         "ticket:view", "ticket:manage",
-        "analytics:view",
+        "analytics:view", "usage:view",
         "audit:view",
         "memory:view",
         "channel:view", "employee:view",
@@ -106,7 +109,7 @@ ROLE_PERMISSIONS = {
         "tool:view",
         "model:view",
         "channel:view", "employee:view",
-        "analytics:view",
+        "analytics:view", "usage:view",
     ],
     "customer_service": [
         "dashboard:view",

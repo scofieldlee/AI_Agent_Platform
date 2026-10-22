@@ -184,12 +184,14 @@ def create_app() -> FastAPI:
     app.add_middleware(LocalTimezoneMiddleware)
 
     # --- Routes ---
-    from app.api.v1.endpoints import health, agents, conversations, knowledge, tools, analytics, memories, human_tasks, auth, workflow, monitoring, public, models, ai_employees, audit, channels, tool_approvals, resource_shares, qa_sediment
+    from app.api.v1.endpoints import health, agents, conversations, knowledge, tools, analytics, memories, human_tasks, auth, workflow, monitoring, public, models, ai_employees, audit, channels, tool_approvals, resource_shares, qa_sediment, agent_kb, usage
     from app.multimodal.api import endpoints as multimodal
 
     app.include_router(health.router, prefix="/api/v1", tags=["health"])
     app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
     app.include_router(agents.router, prefix="/api/v1/agents", tags=["agents"])
+    app.include_router(agent_kb.router, prefix="/api/v1/agents", tags=["agent-kb"])
+    app.include_router(usage.router, prefix="/api/v1/usage", tags=["usage"])
     app.include_router(conversations.router, prefix="/api/v1/conversations", tags=["conversations"])
     app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledge"])
     app.include_router(tools.router, prefix="/api/v1/tools", tags=["tools"])

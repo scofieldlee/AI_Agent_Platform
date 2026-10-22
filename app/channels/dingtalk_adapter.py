@@ -230,5 +230,62 @@ class DingTalkAdapter(ChannelAdapter):
         else:
             raise RuntimeError(f"无法回复：未知会话 {external_chat_id[:16]}（未收到过该会话的消息）")
 
+    async def send_rich(self, external_chat_id: str, msg) -> None:
+        """Send a rich message: markdown body + optional link buttons.
+
+        - With buttons  → sampleActionCard (markdown + button list)
+        - Without       → sampleMarkdown
+        """
+        from app.channels.dingtalk_card import (
+            render_dingtalk_actioncard, render_dingtalk_markdown)
+
+        meta = self._chat_meta.get(external_chat_id)
+        robot_code = (meta or {}).get("robot_code") or self._client_id
+
+        has_buttons = any(b.url for b in msg.buttons)
+        if has_buttons:
+            msg_key = "sampleActionCard"
+            msg_param = json.dumps(render_dingtalk_actioncard(msg), ensure_ascii=False)
+        else:
+            msg_key = "sampleMarkdown"
+            msg_param = json.dumps(render_dingtalk_markdown(msg), ensure_ascii=False)
+
+        if meta and meta.get("type") == "2":
+            # Group reply
+            await self._api_send(
+                "/v1.0/robot/groupMessages/send",
+                {
+                    "robotCode": robot_code,
+                    "openConversationId": external_chat_id,
+                    "msgKey": msg_key,
+                    "msgParam": msg_param,
+                },
+            )
+        elif meta and meta.get("sender_id"):
+            # P2P reply
+            await self._api_send(
+                "/v1.0/robot/oToMessages/batchSend",
+                {
+                    "robotCode": robot_code,
+                    "userIds": [meta["sender_id"]],
+                    "msgKey": msg_key,
+                    "msgParam": msg_param,
+                },
+            )
+        elif meta and meta.get("webhook"):
+            # Fallback: session webhook (markdown msgtype, no buttons)
+            card = (render_dingtalk_markdown(msg) if not has_buttons
+                    else render_dingtalk_actioncard(msg))
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(
+                    meta["webhook"],
+                    json={"msgtype": "markdown",
+                          "markdown": {"title": card["title"], "text": card["text"]}},
+                )
+            if resp.status_code >= 400:
+                raise RuntimeError(f"钉钉 webhook 富消息失败: {resp.text[:200]}")
+        else:
+            raise RuntimeError(f"无法回复：未知会话 {external_chat_id[:16]}（未收到过该会话的消息）")
+
     def stop(self) -> None:
         self._stop_event.set()

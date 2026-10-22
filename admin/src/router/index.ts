@@ -44,6 +44,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '执行追踪', icon: 'LineChartOutlined', permission: 'analytics:view' }
       },
       {
+        path: 'usage',
+        name: 'UsageStats',
+        component: () => import('@/views/UsageStats.vue'),
+        meta: { title: '用量统计', icon: 'PieChartOutlined', permission: 'usage:view' }
+      },
+      {
         path: 'memories',
         name: 'Memories',
         component: () => import('@/views/Memories.vue'),
@@ -54,6 +60,12 @@ const routes: RouteRecordRaw[] = [
         name: 'Agents',
         component: () => import('@/views/Agents.vue'),
         meta: { title: 'Agent 管理', icon: 'RobotOutlined', permission: 'agent:view' }
+      },
+      {
+        path: 'agents/:id/config',
+        name: 'AgentConfig',
+        component: () => import('@/views/AgentConfig.vue'),
+        meta: { title: 'Agent 配置', permission: 'agent:view' }
       },
       {
         path: 'employees',
